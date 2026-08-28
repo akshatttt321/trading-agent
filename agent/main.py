@@ -188,13 +188,30 @@ class Agent:
             due = self._manage_due(snap, perps_md, now)
             if due:
                 return "manager: " + due
-        # 3) entry attention, price-only: same move-vs-ATR bar as the quiet gate (which stays the authority)
+        # 3) entry attention, price-only. Two guards so volatile markets don't spam the paid brain:
+        #    (a) capacity: if the entry agent has no room to act, waking it is a guaranteed paid HOLD - skip;
+        #    (b) the bar mirrors the quiet gate's REAL threshold (hold-streak + dead-hours multipliers), so the
+        #        tick never wakes for a look the gate would refuse anyway.
+        if len(snap.perps) >= self.cfg.risk.max_open_positions:
+            return ""
+        try:
+            rooms = [b.get("room", 1) for b in ((self._limits_now(snap, lm) or {}).get("buckets") or {}).values()]
+            if rooms and not any(rooms):
+                return ""
+        except Exception:
+            log.exception("tick capacity check")
+        streak = int(self.state.get("hold_streak") or 0)
+        mult = min(1.0 + l.hold_streak_step * streak, l.hold_streak_max_mult)
+        h_now = time.gmtime().tm_hour
+        if l.dead_hours and l.dead_hours[0] <= h_now < l.dead_hours[1]:
+            mult *= l.dead_hour_mult
+        bar_mult = l.attention_threshold * mult
         last_px = self.state.get("last_llm_prices") or {}
         for c, ref in last_px.items():
             if c in raw and ref and c in perps_md:
                 atr_c = perps_md[c].get("atr14_1h_pct")
                 bar = max(atr_c * l.move_atr_fraction, 0.05) if atr_c else l.quiet_move_pct
-                if abs(raw[c] / ref - 1) * 100 / bar >= l.attention_threshold:
+                if abs(raw[c] / ref - 1) * 100 / bar >= bar_mult:
                     return f"{c} moved {abs(raw[c] / ref - 1) * 100:.2f}% since last look"
         return ""
 
@@ -337,6 +354,8 @@ class Agent:
         self.state.set("last_manage_prices", {p.coin: p.mark_px for p in snap.perps})
         self.state.set("last_manage_upnl", sum(p.unrealized_pnl for p in snap.perps))
         log.info(f"[bold]manage[/] ({due}): {decision.market_view}")
+        self._managed = {"due": due, "view": (decision.market_view or "")[:200],
+                         "actions": len([a for a in decision.actions if a.kind != "hold"])}
         acted = False
         loss_exits: List[Tuple[Action, str]] = []
         for a in decision.actions:
@@ -367,19 +386,25 @@ class Agent:
         self._account_tokens()                                 # manager tokens booked now; propose() resets the counter later
         return acted
 
-    @staticmethod
-    def _useful_watch_levels(levels, snap: AccountSnapshot, ts: float) -> list:
-        """Store only levels that add information: not within 0.2% of an existing stop/TP on the same coin
-        (those fire automatically on the tick - waking the model there is a wasted alarm + LLM call)."""
+    def _useful_watch_levels(self, levels, snap: AccountSnapshot, ts: float) -> list:
+        """MERGE the model's new levels into the active set (per coin+direction: newest wins) instead of wholesale
+        replace - alarms on coins the model did not re-mention survive until hit or 24h expiry, so frequent looks
+        cannot churn them into never firing. Levels within 0.2% of an existing stop/TP are dropped (those already
+        fire automatically on the tick)."""
         taken = {}
         for p in snap.perps:
             taken.setdefault(p.coin, []).extend([x for x in (p.stop_px, p.tp_px) if x])
-        out = []
+        fresh = []
         for w in levels[:6]:
             if any(abs(w.px - x) / x < 0.002 for x in taken.get(w.coin, []) if x):
                 continue
-            out.append(w.model_dump() | {"ts": ts})
-        return out
+            fresh.append(w.model_dump() | {"ts": ts})
+        newkeys = {(w["coin"], w["direction"]) for w in fresh}
+        ttl = self.cfg.llm.watch_level_ttl_hours * 3600
+        kept = [w for w in (self.state.get("watch_levels") or [])
+                if (w["coin"], w.get("direction")) not in newkeys and ts - (w.get("ts") or ts) < ttl]
+        merged = (kept + fresh)[-8:]                       # oldest dropped past 8 total
+        return merged
 
     def _place_resting(self, act: Action, reason: str, risk_usd: float, regime: str, view: str, cycle_id: int) -> None:
         """Park a gate/verifier/RR-approved limit entry; the 30s tick fills or expires it."""
@@ -575,6 +600,7 @@ class Agent:
     # -------------------------------------------------------------------- cycle
     def cycle(self) -> None:
         self._wake = self.state.get("wake_reason") or ""   # why this cycle ran ('' = heartbeat); journaled with the cycle
+        self._managed = None                               # set when the position manager runs this cycle
         if self._wake:
             self.state.set("wake_reason", "")
         last_snap = (self.state.get("live_snapshot") or {}).get("snapshot") or {}
@@ -624,7 +650,7 @@ class Agent:
             self.researcher.annotate(market.get("prediction_markets", []))   # research only when we will actually ask the model
         if quiet_reason:
             log.info(f"[dim]quiet - LLM call skipped ({quiet_reason})[/]")
-            self.state.finish_cycle(cycle_id, "", {"skipped": quiet_reason, "actions": [], "wake": self._wake})
+            self.state.finish_cycle(cycle_id, "", {"skipped": quiet_reason, "actions": [], "wake": self._wake} | ({"managed": self._managed} if self._managed else {}))
             console.rule(f"[dim]equity ${snap.equity_usd:,.2f}  positions={snap.open_position_count}  (quiet)")
             return
         def _mark_llm_baselines():
@@ -663,7 +689,7 @@ class Agent:
             decision, raw = self.brain.propose(user_msg)
         except Exception as e:
             log.exception("LLM call failed")
-            self.state.finish_cycle(cycle_id, "", {"wake": self._wake}, error=str(e))
+            self.state.finish_cycle(cycle_id, "", {"wake": self._wake} | ({"managed": self._managed} if self._managed else {}), error=str(e))
             return
 
         if decision.market_view != "(proposer failed)":
@@ -799,7 +825,7 @@ class Agent:
         self._account_tokens()
         self.state.set("hold_streak", 0 if proposed_any else int(self.state.get("hold_streak") or 0) + 1)
 
-        self.state.finish_cycle(cycle_id, raw, decision.model_dump() | {"wake": self._wake})
+        self.state.finish_cycle(cycle_id, raw, decision.model_dump() | {"wake": self._wake} | ({"managed": self._managed} if self._managed else {}))
         snap = self.snapshot(prices)
         self.state.update_snapshot(cycle_id, snap.equity_usd, snap.model_dump())   # post-trade state -> dashboard sees fills now
         start = self.state.get("starting_equity") or snap.equity_usd

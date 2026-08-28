@@ -257,6 +257,15 @@
       'attention gate: order books unchanged, no news flags; skipping the model call to save cost',
       'attention gate: BTC/ETH within 0.2% of last consult, positions unchanged, stops not near',
     ];
+    // cheap position-manager review of the open positions (decision.managed) — present on a few cycles so the
+    // UI shows the entry model being skipped while positions were still reviewed. actions = changes it made.
+    const MANAGED = scenario === 'quiet' && id % 3 === 0
+      ? { due: 'interval 10m', view: 'Both shorts are moving favorably and the stops already trail price. Nothing to adjust.', actions: 0 }
+      : scenario === 'stop'
+      ? { due: 'BTC moved 0.63%', view: 'BTC long pushing through the watch level; trailed the stop to lock in 0.5R.', actions: 1 }
+      : scenario === 'hold' && id % 4 === 0
+      ? { due: 'XRP moved 0.63%', view: 'Open positions all sit inside their stops; funding unchanged. Reviewed — all fine.', actions: 0 }
+      : null;
     // why an event-fired cycle ran (decision.wake); scheduled heartbeats carry no wake
     const WAKE = {
       stop: 'watch level: BTC above 77850 [trail the stop once the breakout confirms]',
@@ -266,8 +275,8 @@
       id, ts: round(ts, 1), equity: eq,
       error: scenario === 'llmerr' ? pick(['LLM call failed: 529 overloaded (retry next cycle)', 'proposer returned no parsable JSON after 2 attempts', 'venue snapshot failed: HTTP 503 from info endpoint']) : '',
       decision: scenario === 'llmerr' ? null
-        : scenario === 'quiet' ? { skipped: pick(QUIET), actions: [] }
-        : Object.assign({ market_view: pick(VIEWS), notes: pick(NOTES), actions }, verifier ? { verifier } : {}, WAKE[scenario] ? { wake: WAKE[scenario] } : {}),
+        : scenario === 'quiet' ? Object.assign({ skipped: pick(QUIET), actions: [] }, MANAGED ? { managed: MANAGED } : {})
+        : Object.assign({ market_view: pick(VIEWS), notes: pick(NOTES), actions }, verifier ? { verifier } : {}, WAKE[scenario] ? { wake: WAKE[scenario] } : {}, MANAGED ? { managed: MANAGED } : {}),
       orders,
     };
   }

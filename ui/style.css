@@ -914,3 +914,6 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 /* wake badge — why an event-fired cycle ran instead of the scheduled heartbeat (decision.wake) */
 .wake-badge { font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); border: 1px solid rgba(250,178,25,0.3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 :root[data-theme="light"] .wake-badge { border-color: rgba(185,125,0,0.35); }
+/* manager badge — the cheap position-manager model reviewed open positions this cycle (decision.managed) */
+.managed-badge { font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 999px; background: rgba(45,190,190,0.13); color: #3fc6c6; border: 1px solid rgba(45,190,190,0.3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+:root[data-theme="light"] .managed-badge { color: #0c7d7d; background: rgba(14,138,138,0.1); border-color: rgba(14,138,138,0.35); }

@@ -1024,17 +1024,24 @@
       const viewItems = pred ? items.filter((it) => it.synthetic || !it.o || pred(it.o)) : items;
       const shown = viewItems.slice(0, 2);
       const skip = kind === 'quiet' ? skipReason(c) : '';
+      // cheap position-manager review of the open positions this cycle (decision.managed)
+      const mg = d.managed && typeof d.managed === 'object' ? d.managed : null;
+      const mgActs = mg ? (Number(mg.actions) || 0) : 0;
       let summary = shown.map((it) => !it.synthetic ? shortAction(it.a, it.cls, it.o)
-        : kind === 'quiet' ? `<span class="tag tag-quiet">QUIET</span><span class="sum-text sum-why">${esc(skip.length > 70 ? skip.slice(0, 68) + '…' : skip)}</span>`
+        : kind === 'quiet' ? (mg
+          ? `<span class="tag tag-quiet">QUIET</span><span class="sum-text sum-why" title="${esc(skip)}">entry quiet · manager reviewed</span>`
+          : `<span class="tag tag-quiet">QUIET</span><span class="sum-text sum-why">${esc(skip.length > 70 ? skip.slice(0, 68) + '…' : skip)}</span>`)
         : c.error ? `<span class="tag tag-failed">ERROR</span><span class="sum-text sum-why">${esc(c.error.slice(0, 70))}</span>`
         : `<span class="tag tag-hold">HOLD</span><span class="sum-text sum-why">no actions this cycle</span>`).join('');
       if (viewItems.length > 2) summary += `<span class="sum-more">+${viewItems.length - 2} more</span>`;
       // event-fired cycle: decision.wake says why it ran (empty/missing = scheduled heartbeat)
       const wake = d.wake ? String(d.wake).trim() : '';
       if (wake) summary += `<span class="wake-badge" title="${esc(wake)}">⚡ ${esc(wake.length > 60 ? wake.slice(0, 59) + '…' : wake)}</span>`;
+      // position manager reviewed the open positions this cycle (cheap model; actions = changes it made)
+      if (mg) summary += `<span class="managed-badge" title="${esc((mg.due ? String(mg.due) : '') + ' — ' + (mg.view ? String(mg.view) : ''))}">🛡 manager${mgActs > 0 ? ` · ${mgActs} action${mgActs === 1 ? '' : 's'}` : ''}</span>`;
       const rows = viewItems.filter((it) => !it.synthetic).map((it) => renderAction(it.a, it.o, it.cls));
       if (!rows.length) rows.push(kind === 'quiet'
-        ? `<div class="action quiet"><span class="tag tag-quiet">QUIET</span><div class="action-body muted">Skipped by the attention gate — ${esc(skip)}</div></div>`
+        ? `<div class="action quiet"><span class="tag tag-quiet">QUIET</span><div class="action-body muted">${mg ? 'Entry model skipped' : 'Skipped'} by the attention gate — ${esc(skip)}${mg ? ` · position manager reviewed${mgActs > 0 ? ` (${mgActs} action${mgActs === 1 ? '' : 's'})` : ' — all fine'}` : ''}</div></div>`
         : `<div class="action hold"><span class="tag tag-hold">HOLD</span><div class="action-body muted">No actions this cycle.</div></div>`);
       const ver = verifierOf(c);
       const open = state.feedOpen.has(String(c.id));
@@ -1048,7 +1055,7 @@
         <div class="cycle-body">
           <div class="cycle-head"><span class="cid">cycle #${esc(c.id)}</span><span>${esc(fmtTime(c.ts))}</span><span class="muted">${esc(fmtAge(Date.now() / 1000 - c.ts))} ago</span></div>
           ${c.error ? `<div class="cycle-error">error: ${esc(c.error)}</div>` : ''}
-          ${d.market_view ? `<div class="market-view"><span class="k">Model's view</span>${esc(d.market_view)}</div>` : kind === 'quiet' ? '<div class="market-view muted">(model not consulted — the attention gate skipped this cycle)</div>' : (!c.error ? '<div class="market-view muted">(no market view recorded)</div>' : '')}
+          ${d.market_view ? `<div class="market-view"><span class="k">Model's view</span>${esc(d.market_view)}</div>` : kind === 'quiet' ? `<div class="market-view muted">(entry model not consulted — the attention gate skipped this cycle${mg ? '; the position manager reviewed the open positions' : ''})</div>` : (!c.error ? '<div class="market-view muted">(no market view recorded)</div>' : '')}
           ${d.notes ? `<div class="notes"><span class="k">Notes</span>${esc(d.notes)}</div>` : ''}
           ${ver ? `<blockquote class="verifier ${esc(ver.verdict.toLowerCase().replace(/[^a-z]/g, ''))}"><span class="vlabel">Verifier${ver.model ? ' · ' + esc(ver.model) : ''}${ver.verdict ? ` · <b>${esc(ver.verdict.toUpperCase())}</b>` : ''}</span>${esc(ver.comment)}</blockquote>` : ''}
           <div class="actions">${rows.join('')}</div>
