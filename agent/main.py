@@ -110,12 +110,13 @@ class Agent:
                 if lesson:
                     log.info(lesson)
 
-    def watch(self) -> None:
+    def watch(self, prices: Optional[Dict[str, float]] = None) -> None:
         """Cheap between-cycle guard (no LLM): live prices -> paper stops/TPs, drawdown & kill checks."""
-        prices = self.md.all_mids()
-        if not prices:
-            return
-        prices = {**self.md.last_pm_prices, **prices}     # PM token prices from the last gather (<=5 min old)
+        if prices is None:
+            prices = self.md.all_mids()
+            if not prices:
+                return
+            prices = {**self.md.last_pm_prices, **prices}     # PM token prices from the last gather
         held_mids = {q.market_id for v in self.unique_venues for q in v.snapshot(prices).pm}
         if held_mids:                                       # fresh prices for held tokens so PM stops/targets fire on time
             from .market_data import pm_live_prices
@@ -149,6 +150,50 @@ class Agent:
             res = self.venues["pm"].execute(a, prices)
             if res.ok:
                 self.notify.send(f"AUTO-PROTECT PM '{q.outcome}': stop {stop} target {tp} ({q.question[:40]})", "warning")
+
+    def tick(self) -> str:
+        """30s sensor: run the cheap guard, then decide whether anything warrants an immediate decision cycle.
+        Returns a wake reason ('' = keep sleeping). Free - prices only, no LLM, cached indicators."""
+        raw = self.md.all_mids()
+        if not raw:
+            return ""
+        prices = {**self.md.last_pm_prices, **raw}
+        self.watch(prices)
+        l = self.cfg.llm
+        now = time.time()
+        # 1) model-declared watch levels (one-shot alarms)
+        levels = self.state.get("watch_levels") or []
+        keep, hits = [], []
+        for w in levels:
+            if now - (w.get("ts") or now) > l.watch_level_ttl_hours * 3600:
+                continue                                   # expired unhit
+            px = raw.get(w.get("coin"))
+            if px and ((w.get("direction") == "above" and px >= w["px"]) or (w.get("direction") == "below" and px <= w["px"])):
+                hits.append(f"{w['coin']} {w['direction']} {w['px']}" + (f" [{w.get('note')}]" if w.get("note") else ""))
+            else:
+                keep.append(w)
+        if hits:
+            self.state.set("watch_levels", keep)           # hit levels are consumed
+            return "watch level: " + "; ".join(hits[:3])
+        if len(keep) != len(levels):
+            self.state.set("watch_levels", keep)
+        lm = getattr(self, "_last_market", None) or {}
+        perps_md = lm.get("perps", {})
+        # 2) manager wake conditions on open positions (cached 15m ATRs, fresh marks)
+        snap = self.snapshot(prices)
+        if (snap.perps or snap.pm) and l.manager_enabled:
+            due = self._manage_due(snap, perps_md, now)
+            if due:
+                return "manager: " + due
+        # 3) entry attention, price-only: same move-vs-ATR bar as the quiet gate (which stays the authority)
+        last_px = self.state.get("last_llm_prices") or {}
+        for c, ref in last_px.items():
+            if c in raw and ref and c in perps_md:
+                atr_c = perps_md[c].get("atr14_1h_pct")
+                bar = max(atr_c * l.move_atr_fraction, 0.05) if atr_c else l.quiet_move_pct
+                if abs(raw[c] / ref - 1) * 100 / bar >= l.attention_threshold:
+                    return f"{c} moved {abs(raw[c] / ref - 1) * 100:.2f}% since last look"
+        return ""
 
     def _throttle_mult(self) -> float:
         """Equity-curve throttle: 2+ consecutive stop-outs -> size x loss_streak_throttle for loss_streak_hours;
@@ -276,32 +321,7 @@ class Agent:
         if today.get("day") == time.strftime("%Y-%m-%d", time.gmtime()) and today.get("cost_usd", 0.0) >= l.max_usd_per_day:
             return False                                       # spend cap: deterministic housekeeping still protects
         now = time.time()
-        last_ts = self.state.get("last_manage_ts") or 0
-        last_px = self.state.get("last_manage_prices") or {}
-        perps_md = market.get("perps", {})
-        due = ""
-        if now - last_ts >= l.manager_interval_min * 60:
-            due = f"interval {l.manager_interval_min}m"
-        for p in snap.perps:
-            if due:
-                break
-            if p.stop_px is None:
-                due = f"{p.coin} unprotected"
-                break
-            atr15 = (perps_md.get(p.coin) or {}).get("atr14_15m_pct") or (perps_md.get(p.coin) or {}).get("atr14_1h_pct") or 1.0
-            ref = last_px.get(p.coin)
-            if ref and abs(p.mark_px / ref - 1) * 100 >= atr15 * l.manager_min_move_atr15:
-                due = f"{p.coin} moved {abs(p.mark_px / ref - 1) * 100:.2f}%"
-                break
-            for lvl in (p.stop_px, p.tp_px):
-                if lvl and abs(p.mark_px - lvl) / p.mark_px * 100 < l.near_level_pct:
-                    due = f"{p.coin} near stop/TP"
-                    break
-        if not due:
-            last_upnl = self.state.get("last_manage_upnl")
-            upnl = sum(p.unrealized_pnl for p in snap.perps)
-            if last_upnl is not None and snap.equity_usd and abs(upnl - last_upnl) >= snap.equity_usd * l.manager_min_upnl_swing_pct / 100:
-                due = f"uPnL swing ${upnl - last_upnl:+.2f}"
+        due = self._manage_due(snap, market.get("perps", {}), now)
         if not due:
             return False
         msg = build_manager_message(self.cfg, snap, market, self.state.get("starting_equity") or snap.equity_usd)
@@ -314,6 +334,8 @@ class Agent:
         self.state.set("last_manage_prices", {p.coin: p.mark_px for p in snap.perps})
         self.state.set("last_manage_upnl", sum(p.unrealized_pnl for p in snap.perps))
         log.info(f"[bold]manage[/] ({due}): {decision.market_view}")
+        if decision.watch_levels:
+            self.state.set("watch_levels", [w.model_dump() | {"ts": now} for w in decision.watch_levels[:6]])
         acted = False
         loss_exits: List[Tuple[Action, str]] = []
         for a in decision.actions:
@@ -344,6 +366,29 @@ class Agent:
         self._account_tokens()                                 # manager tokens booked now; propose() resets the counter later
         return acted
 
+    def _manage_due(self, snap: AccountSnapshot, perps_md: Dict, now: float) -> str:
+        """Why the position manager should look now ('' = nothing). Shared by the 30s tick and the cycle."""
+        l = self.cfg.llm
+        last_ts = self.state.get("last_manage_ts") or 0
+        last_px = self.state.get("last_manage_prices") or {}
+        if now - last_ts >= l.manager_interval_min * 60:
+            return f"interval {l.manager_interval_min}m"
+        for p in snap.perps:
+            if p.stop_px is None:
+                return f"{p.coin} unprotected"
+            atr15 = (perps_md.get(p.coin) or {}).get("atr14_15m_pct") or (perps_md.get(p.coin) or {}).get("atr14_1h_pct") or 1.0
+            ref = last_px.get(p.coin)
+            if ref and abs(p.mark_px / ref - 1) * 100 >= atr15 * l.manager_min_move_atr15:
+                return f"{p.coin} moved {abs(p.mark_px / ref - 1) * 100:.2f}%"
+            for lvl in (p.stop_px, p.tp_px):
+                if lvl and abs(p.mark_px - lvl) / p.mark_px * 100 < l.near_level_pct:
+                    return f"{p.coin} near stop/TP"
+        last_upnl = self.state.get("last_manage_upnl")
+        upnl = sum(p.unrealized_pnl for p in snap.perps)
+        if last_upnl is not None and snap.equity_usd and abs(upnl - last_upnl) >= snap.equity_usd * l.manager_min_upnl_swing_pct / 100:
+            return f"uPnL swing ${upnl - last_upnl:+.2f}"
+        return ""
+
     def _exec_managed(self, act: Action, reason: str, cycle_id: int, prices: Dict[str, float]) -> None:
         venue = self.venues["pm"] if act.kind in PM_KINDS else self.venues["hl"]
         res: ExecResult = venue.execute(act, prices)
@@ -362,6 +407,10 @@ class Agent:
         market = market or {}
         if not l.skip_if_quiet:
             return ""
+        wr = self.state.get("wake_reason") or ""
+        if wr.startswith("watch level"):
+            self.state.set("wake_reason", "")
+            return ""                                      # the model asked to be woken at this price - let it look
         # hard triggers: unprotected position or a position near its stop/TP.
         # With the position-manager brain enabled these are ITS wake conditions - the full entry agent stays asleep.
         if not l.manager_enabled:
@@ -466,6 +515,7 @@ class Agent:
         last_snap = (self.state.get("live_snapshot") or {}).get("snapshot") or {}
         held_coins = {p.get("coin") for p in last_snap.get("perps", []) if p.get("coin")}
         market = self.md.gather(fast_extra=held_coins)
+        self._last_market = market                       # cached indicators for the 30s sensor tick
         prices: Dict[str, float] = market.pop("_prices")
         pm_tokens: Dict[str, str] = market.pop("_pm_tokens", {})
         for v in self.unique_venues:                      # let venues label PM positions with the real question / end time
@@ -554,6 +604,8 @@ class Agent:
         if decision.market_view != "(proposer failed)":
             _mark_llm_baselines()                    # reset the attention clock only when the model actually answered
         log.info(f"[bold]view:[/] {decision.market_view}")
+        if decision.watch_levels:
+            self.state.set("watch_levels", [w.model_dump() | {"ts": time.time()} for w in decision.watch_levels[:6]])
         if decision.notes:
             log.info(f"[dim]notes: {decision.notes}[/]")
 
@@ -734,18 +786,27 @@ class Agent:
                         pass
             if once:
                 return
-            # between decisions: kill-file check every 5s, price watch (stops / drawdown) every 60s
+            # EVENT-DRIVEN: kill-file check every 5s; 30s sensor tick (stops, watch levels, wake triggers).
+            # A wake runs the next decision cycle immediately; otherwise the heartbeat (loop_interval_seconds)
+            # refreshes indicators with a free gather - the quiet gate still decides whether the LLM is called.
+            last_cycle_end = time.time()
+            tick_every = max(cfg.llm.tick_seconds // 5, 1)
             for i in range(cfg.loop_interval_seconds // 5):
                 if KILL_FILE.exists():
                     self.flatten_and_die("manual kill file", self.md.all_mids())
                 self._restart_if_changed(baseline)
-                if i and i % 12 == 0:
+                if i and i % tick_every == 0:
+                    wake = ""
                     try:
-                        self.watch()
+                        wake = self.tick()
                     except SystemExit:
                         raise
                     except Exception:
-                        log.exception("watch error")
+                        log.exception("tick error")
+                    if wake and time.time() - last_cycle_end >= cfg.llm.min_cycle_gap_seconds:
+                        log.info(f"[bold]wake[/] {wake}")
+                        self.state.set("wake_reason", wake)
+                        break
                 time.sleep(5)
 
 

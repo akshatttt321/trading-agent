@@ -51,6 +51,10 @@ class LLMCfg(BaseModel):
     manager_interval_min: int = 10           # max minutes between manager looks while positions are open
     manager_min_move_atr15: float = 0.5      # wake early: held coin moved this x its 15m ATR since last look
     manager_min_upnl_swing_pct: float = 0.4  # wake early: total uPnL swung this % of equity
+    # --- event-driven sensor loop ---
+    tick_seconds: int = 30                   # sensor tick: prices -> stops, watch levels, wake triggers
+    min_cycle_gap_seconds: int = 60          # min gap between event-fired decision cycles (storm guard)
+    watch_level_ttl_hours: int = 24          # unhit model-declared levels expire after this
     vol_low_atr_pct: float = 0.3
     vol_high_atr_pct: float = 1.5
     history_cycles: int = 5

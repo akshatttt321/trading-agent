@@ -168,7 +168,8 @@ def check() -> None:
 
     incidents = []
     # 2) stuck? (container up but no cycle for > STUCK_AFTER x interval) - but a KILLED agent is stopped on purpose
-    age = now - (s.get("last_cycle_ts") or now)
+    # event-driven agent: decision cycles are rare by design; the 30s sensor tick is the liveness signal
+    age = now - (s.get("last_tick_ts") or s.get("last_cycle_ts") or now)
     if age > STUCK_AFTER * interval and not s.get("killed"):
         c = find_agent()
         if c and c.status != "running":

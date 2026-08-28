@@ -51,6 +51,8 @@ def config_schema() -> Dict[str, Dict[str, Any]]:
         "llm.verifier.enabled": {"type": "bool", "label": "Verifier enabled", "danger": True, "help": "second model must approve every risk-adding trade"},
         "llm.verifier.provider": {"type": "enum", "options": ["gemini", "openai", "anthropic"], "label": "Verifier provider"},
         "llm.verifier.model": {"type": "enum", "options": models, "label": "Verifier model"},
+        "llm.tick_seconds": {"type": "int", "min": 10, "max": 120, "label": "Sensor tick (s)", "help": "price sensor: stops, watch levels, wake triggers"},
+        "llm.min_cycle_gap_seconds": {"type": "int", "min": 30, "max": 600, "label": "Min gap between event cycles (s)"},
         "llm.manager_enabled": {"type": "bool", "label": "Position manager (2nd agent)", "help": "cheap model reviews open positions on a fast cadence"},
         "llm.manager.model": {"type": "enum", "options": models, "label": "Manager model"},
         "llm.manager.thinking": {"type": "enum", "options": ["none", "minimal", "low", "medium", "high"], "label": "Manager thinking"},

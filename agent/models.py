@@ -36,10 +36,18 @@ class Action(BaseModel):
     confidence: float = Field(0.5, ge=0, le=1)
 
 
+class WatchLevel(BaseModel):
+    coin: str
+    direction: str = "above"      # above | below
+    px: float
+    note: str = ""
+
+
 class Decision(BaseModel):
     market_view: str = ""
     actions: List[Action] = Field(default_factory=list)
     notes: str = ""
+    watch_levels: List[WatchLevel] = Field(default_factory=list)   # one-shot price alarms the 30s sensor watches
 
 
 class PerpPosition(BaseModel):

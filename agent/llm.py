@@ -41,6 +41,11 @@ DECISION_SCHEMA = {
         "market_view": {"type": "string", "description": "2-5 sentences: regime, what matters right now."},
         "actions": {"type": "array", "description": "Ordered actions. Empty or a single 'hold' = do nothing.", "items": ACTION_SCHEMA},
         "notes": {"type": "string", "description": "Anything to remember for the next cycle."},
+        "watch_levels": {"type": "array", "description": "One-shot price alarms (max 6): the exact prices that would change your mind. A 30s sensor wakes you within ~30s when one hits.", "items": {
+            "type": "object",
+            "properties": {"coin": {"type": "string"}, "direction": {"type": "string", "enum": ["above", "below"]},
+                           "px": {"type": "number"}, "note": {"type": "string"}},
+            "required": ["coin", "direction", "px"]}},
     },
     "required": ["market_view", "actions"],
 }
@@ -78,6 +83,11 @@ MANAGE_SCHEMA = {
         "market_view": {"type": "string", "description": "1-3 sentences: how the open positions look right now."},
         "actions": {"type": "array", "description": "Management actions only. Empty = everything placed right.", "items": _MANAGE_ACTION},
         "notes": {"type": "string"},
+        "watch_levels": {"type": "array", "description": "One-shot price alarms (max 6): the exact prices that would change your mind. A 30s sensor wakes you within ~30s when one hits.", "items": {
+            "type": "object",
+            "properties": {"coin": {"type": "string"}, "direction": {"type": "string", "enum": ["above", "below"]},
+                           "px": {"type": "number"}, "note": {"type": "string"}},
+            "required": ["coin", "direction", "px"]}},
     },
     "required": ["market_view", "actions"],
 }
@@ -177,6 +187,13 @@ HOW TO DECIDE
     via the stop or take-profit. If momentum reverses, the thesis breaks, or you simply want to bank a gain now, propose
     the close this cycle. Do not cling to a position just because its stop has not been hit. A loss-realising close is
     reviewed by the verifier; a profitable close executes immediately.
+  - WATCH LEVELS: you are EVENT-DRIVEN. Between looks a 30-second price sensor sleeps until something you named
+    matters. With every decision set watch_levels: breakout triggers, invalidation prices, entries you are stalking.
+    A hit wakes you within ~30s. If you set none, you sleep until generic attention math wakes you - slower and
+    dumber than you naming the level yourself.
+  - LIVE CANDLE: live_15m (fast coins) is the CURRENT, UNCONFIRMED 15m candle - use it to TIME scalp entries/exits
+    (watch vol_vs_avg build, wait for a reclaim instead of chasing a wick). It is never evidence of regime: all
+    states/signals use CLOSED candles only.
   - ENTRY TIMING (coins with 15m fields - midcaps/movers/open positions): direction comes from the 1h trend, timing
     from the 15m frame. Prefer entries where trend_15m agrees with your direction (tf_align_15m true) - e.g. in a 1h
     uptrend, wait for the 15m dip-and-turn rather than buying a stretched 15m candle. vol_burst_15m > 2 = the move is
@@ -285,6 +302,9 @@ Rules (enforced in code - violations are rejected):
 Judgement guide: move the stop to breakeven after +1R; trail winners while the 15m trend holds; close on thesis break
 or momentum reversal instead of waiting for the stop; bank stalled winners - capital parked in a dead trade is a cost
 (the mandate rewards speed). A scalp that lost its 15m trend (tf_align_15m false, trend_15m against you) is done.
+You may also set watch_levels (one-shot price alarms, max 6): the exact prices where you would want to look again
+(just past the stop, at the scale-out zone, at the level that breaks the thesis) - a 30s sensor wakes you on a hit.
+live_15m is the current UNCONFIRMED 15m candle: timing info only, never proof of a trend change.
 Do NOT churn: if the stops are right and the trade is working, reply actions=[] or hold.
 Every action needs: reason (short) and confidence (honest 0-1)."""
 
@@ -292,7 +312,7 @@ Every action needs: reason (short) and confidence (honest 0-1)."""
 def build_manager_message(cfg: Config, snap: AccountSnapshot, market: Dict, start_equity: float) -> str:
     c = (",", ":")
     KEEP = ("mark", "funding_8h_pct", "signal", "chg_1h_pct", "chg_24h_pct", "atr14_1h_pct", "rsi14_1h", "bb_pos_1h",
-            "vol_expansion", "high_24h", "low_24h", "trend_15m", "rsi14_15m", "atr14_15m_pct", "vol_burst_15m", "tf_align_15m")
+            "vol_expansion", "high_24h", "low_24h", "trend_15m", "rsi14_15m", "atr14_15m_pct", "vol_burst_15m", "tf_align_15m", "live_15m")
     coins = {p.coin for p in snap.perps}
     md = {cn: {k: v for k, v in (market.get("perps", {}).get(cn) or {}).items() if k in KEEP} for cn in coins}
     goal = {"equity_usd": round(snap.equity_usd, 2),

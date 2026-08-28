@@ -200,6 +200,7 @@ class MarketData:
         if len(candles) < 30:
             return {}
         partial = _f(candles[-1].get("T"), 0) > time.time() * 1000
+        live = candles[-1] if partial else None
         if partial:
             candles = candles[:-1]
         closes = [_f(k["c"]) for k in candles]
@@ -213,12 +214,22 @@ class MarketData:
         trend = "up" if (ema20 > ema50 and last > sma20) else "down" if (ema20 < ema50 and last < sma20) else "mixed"
         vols = [_f(k["v"]) for k in candles]
         burst = (sum(vols[-4:]) / 4) / (sum(vols) / len(vols)) if vols and sum(vols) else None  # last hour vs 24h avg
-        return {
+        out = {
             "trend_15m": trend,
             "rsi14_15m": _rsi(closes),
             "atr14_15m_pct": round(atr / last * 100, 2) if last else None,
             "vol_burst_15m": round(burst, 2) if burst else None,
         }
+        if live:   # the CURRENT unconfirmed 15m candle: scalp timing info for the prompt only - never in states/gating
+            lo, lh, ll, lc, lv = _f(live["o"]), _f(live["h"]), _f(live["l"]), _f(live["c"]), _f(live["v"])
+            avg_v = sum(vols[-16:]) / min(16, len(vols)) if vols else 0
+            out["live_15m"] = {
+                "o": lo, "h": lh, "l": ll, "last": lc,
+                "chg_pct": round((lc / lo - 1) * 100, 2) if lo else None,
+                "mins_left": max(0, round(_f(live.get("T"), 0) / 1000 - time.time()) // 60),
+                "vol_vs_avg": round(lv / avg_v, 2) if avg_v else None,
+            }
+        return out
 
     # ------------------------------------------------------------------- spot
     def spot_overview(self) -> Dict[str, Dict]:
