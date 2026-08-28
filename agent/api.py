@@ -138,6 +138,7 @@ def status():
         "days_elapsed": ((time.time() - start_ts) / 86400) if start_ts else None,
         "last_cycle_ts": last["ts"],
         "last_tick_ts": (live or {}).get("ts") or last["ts"],
+        "watch_levels": meta(c, "watch_levels") or [],
         "cycles_total": total,
         "llm_model": f"{cfg.llm.proposer.provider}:{cfg.llm.proposer.model}" + (f" + verifier {cfg.llm.verifier.provider}:{cfg.llm.verifier.model}" if cfg.llm.verifier.enabled else ""),
         "tokens_total": meta(c, "tokens_total"),

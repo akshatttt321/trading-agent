@@ -30,7 +30,8 @@ class Action(BaseModel):
     market_id: Optional[str] = None
     token_id: Optional[str] = None
     outcome: Optional[str] = None
-    limit_price: Optional[float] = Field(None, description="PM price in 0-1")
+    limit_price: Optional[float] = Field(None, description="PM price in 0-1, or perp limit price when order_type='limit'")
+    order_type: Optional[Literal["market", "limit"]] = None   # open_perp only; None = market
     # always
     reason: str = ""
     confidence: float = Field(0.5, ge=0, le=1)

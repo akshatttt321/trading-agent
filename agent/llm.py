@@ -28,7 +28,8 @@ ACTION_SCHEMA = {
         "market_id": {"type": "string"},
         "token_id": {"type": "string", "description": "the short tid code shown for the outcome, e.g. T3"},
         "outcome": {"type": "string"},
-        "limit_price": {"type": "number", "description": "Prediction market price 0.01-0.99"},
+        "limit_price": {"type": "number", "description": "Prediction market price 0.01-0.99; or the perp limit price when order_type='limit'"},
+        "order_type": {"type": "string", "enum": ["market", "limit"], "description": "open_perp only: 'limit' rests at limit_price until touched (maker fill, no slippage), auto-canceled after TTL. Default market."},
         "reason": {"type": "string"},
         "confidence": {"type": "number", "description": "Honest win probability 0-1"},
     },
@@ -83,11 +84,6 @@ MANAGE_SCHEMA = {
         "market_view": {"type": "string", "description": "1-3 sentences: how the open positions look right now."},
         "actions": {"type": "array", "description": "Management actions only. Empty = everything placed right.", "items": _MANAGE_ACTION},
         "notes": {"type": "string"},
-        "watch_levels": {"type": "array", "description": "One-shot price alarms (max 6): the exact prices that would change your mind. A 30s sensor wakes you within ~30s when one hits.", "items": {
-            "type": "object",
-            "properties": {"coin": {"type": "string"}, "direction": {"type": "string", "enum": ["above", "below"]},
-                           "px": {"type": "number"}, "note": {"type": "string"}},
-            "required": ["coin", "direction", "px"]}},
     },
     "required": ["market_view", "actions"],
 }
@@ -187,10 +183,17 @@ HOW TO DECIDE
     via the stop or take-profit. If momentum reverses, the thesis breaks, or you simply want to bank a gain now, propose
     the close this cycle. Do not cling to a position just because its stop has not been hit. A loss-realising close is
     reviewed by the verifier; a profitable close executes immediately.
+  - LIMIT ENTRIES: open_perp with order_type "limit" + limit_price RESTS an order at your price instead of paying
+    spread+slippage: long below the mark, short above. The 30s sensor fills it when touched (maker fee, no slippage)
+    and auto-cancels it if unfilled after {cfg.risk.limit_order_ttl_min} min. Max {cfg.risk.max_resting_orders} resting;
+    a new limit on the same coin+side replaces the old one. Use it for the pullback entries you would otherwise stalk
+    with a watch level (set stop/TP as usual - they attach on fill). Use market when the move is happening NOW.
   - WATCH LEVELS: you are EVENT-DRIVEN. Between looks a 30-second price sensor sleeps until something you named
     matters. With every decision set watch_levels: breakout triggers, invalidation prices, entries you are stalking.
     A hit wakes you within ~30s. If you set none, you sleep until generic attention math wakes you - slower and
-    dumber than you naming the level yourself.
+    dumber than you naming the level yourself. Do NOT set levels at your own stop/TP prices - those already execute
+    automatically within 30s without you; watch levels are for prices where you want to THINK: breakout confirmations,
+    invalidation-you-would-act-on-before-the-stop, scale-in/out zones, entries you are stalking.
   - LIVE CANDLE: live_15m (fast coins) is the CURRENT, UNCONFIRMED 15m candle - use it to TIME scalp entries/exits
     (watch vol_vs_avg build, wait for a reclaim instead of chasing a wick). It is never evidence of regime: all
     states/signals use CLOSED candles only.
@@ -302,8 +305,6 @@ Rules (enforced in code - violations are rejected):
 Judgement guide: move the stop to breakeven after +1R; trail winners while the 15m trend holds; close on thesis break
 or momentum reversal instead of waiting for the stop; bank stalled winners - capital parked in a dead trade is a cost
 (the mandate rewards speed). A scalp that lost its 15m trend (tf_align_15m false, trend_15m against you) is done.
-You may also set watch_levels (one-shot price alarms, max 6): the exact prices where you would want to look again
-(just past the stop, at the scale-out zone, at the level that breaks the thesis) - a 30s sensor wakes you on a hit.
 live_15m is the current UNCONFIRMED 15m candle: timing info only, never proof of a trend change.
 Do NOT churn: if the stops are right and the trade is working, reply actions=[] or hold.
 Every action needs: reason (short) and confidence (honest 0-1)."""

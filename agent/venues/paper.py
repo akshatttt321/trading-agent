@@ -84,9 +84,13 @@ class PaperVenue(Venue):
         if not px:
             return ExecResult(ok=False, detail=f"no price for {a.coin}")
         is_long = a.side == "long"
-        fill = px * (1 + SLIP) if is_long else px * (1 - SLIP)
+        if a.order_type == "limit" and a.limit_price:      # resting order triggered: maker fill exactly at the limit
+            fill = a.limit_price
+            fee = a.size_usd * (FEE / 3)                   # maker fee ~1/3 of taker
+        else:
+            fill = px * (1 + SLIP) if is_long else px * (1 - SLIP)
+            fee = a.size_usd * FEE
         size = a.size_usd / fill * (1 if is_long else -1)
-        fee = a.size_usd * FEE
         pos = self.p["perps"].get(a.coin)
         if pos and (pos["size"] > 0) != is_long:
             return ExecResult(ok=False, detail="opposite position exists; close_perp first")

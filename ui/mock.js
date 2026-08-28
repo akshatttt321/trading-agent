@@ -257,12 +257,17 @@
       'attention gate: order books unchanged, no news flags; skipping the model call to save cost',
       'attention gate: BTC/ETH within 0.2% of last consult, positions unchanged, stops not near',
     ];
+    // why an event-fired cycle ran (decision.wake); scheduled heartbeats carry no wake
+    const WAKE = {
+      stop: 'watch level: BTC above 77850 [trail the stop once the breakout confirms]',
+      close: 'manager: DOGE near stop/TP',
+    };
     return {
       id, ts: round(ts, 1), equity: eq,
       error: scenario === 'llmerr' ? pick(['LLM call failed: 529 overloaded (retry next cycle)', 'proposer returned no parsable JSON after 2 attempts', 'venue snapshot failed: HTTP 503 from info endpoint']) : '',
       decision: scenario === 'llmerr' ? null
         : scenario === 'quiet' ? { skipped: pick(QUIET), actions: [] }
-        : Object.assign({ market_view: pick(VIEWS), notes: pick(NOTES), actions }, verifier ? { verifier } : {}),
+        : Object.assign({ market_view: pick(VIEWS), notes: pick(NOTES), actions }, verifier ? { verifier } : {}, WAKE[scenario] ? { wake: WAKE[scenario] } : {}),
       orders,
     };
   }
@@ -412,6 +417,11 @@
       llm_model: config.llm.proposer.model,
       tokens_today: sumRoles(usage.today),
       tokens_total: sumRoles(usage.total),
+      watch_levels: killed ? [] : [
+        { coin: 'BTC', direction: 'above', px: 79600, note: 'Breakout confirmation — reassess the long if the range high clears', ts: round(t - 2100, 1) },
+        { coin: 'SOL', direction: 'below', px: 165.4, note: 'Stop loss level for SOL long', ts: round(t - 6300, 1) },
+        { coin: 'XRP', direction: 'above', px: 0.66, note: 'Take-profit zone for the XRP swing', ts: round(t - 11800, 1) },
+      ],
       snapshot: snap,
     };
   }

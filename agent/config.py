@@ -156,6 +156,8 @@ class RiskCfg(BaseModel):
     scale_out_r: float = 1.5
     scale_out_frac: float = 0.5
     chop_max_entries_per_day: int = 2
+    limit_order_ttl_min: int = 90            # resting limit entries auto-cancel if unfilled after this
+    max_resting_orders: int = 3
     beta_weighted_risk: bool = True
 
 

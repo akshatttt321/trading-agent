@@ -159,6 +159,9 @@ class Agent:
             return ""
         prices = {**self.md.last_pm_prices, **raw}
         self.watch(prices)
+        resting = self.state.get("resting_orders") or []
+        if resting:
+            self._check_resting(resting, raw, prices)
         l = self.cfg.llm
         now = time.time()
         # 1) model-declared watch levels (one-shot alarms)
@@ -334,8 +337,6 @@ class Agent:
         self.state.set("last_manage_prices", {p.coin: p.mark_px for p in snap.perps})
         self.state.set("last_manage_upnl", sum(p.unrealized_pnl for p in snap.perps))
         log.info(f"[bold]manage[/] ({due}): {decision.market_view}")
-        if decision.watch_levels:
-            self.state.set("watch_levels", [w.model_dump() | {"ts": now} for w in decision.watch_levels[:6]])
         acted = False
         loss_exits: List[Tuple[Action, str]] = []
         for a in decision.actions:
@@ -365,6 +366,69 @@ class Agent:
                 self.state.record_order(cycle_id, a.model_dump(), False, "manager loss exit vetoed: " + why, {})
         self._account_tokens()                                 # manager tokens booked now; propose() resets the counter later
         return acted
+
+    @staticmethod
+    def _useful_watch_levels(levels, snap: AccountSnapshot, ts: float) -> list:
+        """Store only levels that add information: not within 0.2% of an existing stop/TP on the same coin
+        (those fire automatically on the tick - waking the model there is a wasted alarm + LLM call)."""
+        taken = {}
+        for p in snap.perps:
+            taken.setdefault(p.coin, []).extend([x for x in (p.stop_px, p.tp_px) if x])
+        out = []
+        for w in levels[:6]:
+            if any(abs(w.px - x) / x < 0.002 for x in taken.get(w.coin, []) if x):
+                continue
+            out.append(w.model_dump() | {"ts": ts})
+        return out
+
+    def _place_resting(self, act: Action, reason: str, risk_usd: float, regime: str, view: str, cycle_id: int) -> None:
+        """Park a gate/verifier/RR-approved limit entry; the 30s tick fills or expires it."""
+        rest = [r for r in (self.state.get("resting_orders") or [])
+                if not (r["action"].get("coin") == act.coin and r["action"].get("side") == act.side)]   # cancel-replace
+        if len(rest) >= self.cfg.risk.max_resting_orders:
+            self.state.record_order(cycle_id, act.model_dump(), False, f"max {self.cfg.risk.max_resting_orders} resting orders", {})
+            self.notify.send(f"REJECTED limit {act.coin}: max {self.cfg.risk.max_resting_orders} resting orders", "warning")
+            return
+        rest.append({"action": act.model_dump(), "reason": reason, "risk_usd": risk_usd,
+                     "regime": regime, "view": (view or "")[:200], "ts": time.time()})
+        self.state.set("resting_orders", rest)
+        self.state.record_order(cycle_id, act.model_dump(), True, reason + " | resting limit",
+                                {"ok": True, "detail": f"resting limit {act.side} {act.coin} @ {act.limit_price}", "resting": True})
+        self.notify.send(f"RESTING limit {act.side} {act.coin} ${act.size_usd:.0f} @ {act.limit_price} "
+                         f"(ttl {self.cfg.risk.limit_order_ttl_min}m)", "info")
+
+    def _check_resting(self, rest: list, mids: Dict[str, float], prices: Dict[str, float]) -> None:
+        """30s tick: fill resting limits that price has touched; expire stale ones. Approval happened at placement;
+        only structural facts (position cap) are re-checked at fill time."""
+        keep = []
+        ttl = self.cfg.risk.limit_order_ttl_min * 60
+        cid = self.state.last_cycle_id()
+        for r in rest:
+            a = Action.model_validate(r["action"])
+            px = mids.get(a.coin)
+            if time.time() - r["ts"] > ttl:
+                self.state.record_order(cid, a.model_dump(), True, "limit expired unfilled - canceled",
+                                        {"ok": False, "detail": f"expired after {self.cfg.risk.limit_order_ttl_min}m unfilled"})
+                self.notify.send(f"CANCELED limit {a.side} {a.coin} @ {a.limit_price}: unfilled for {self.cfg.risk.limit_order_ttl_min}m", "info")
+                continue
+            hit = px and ((a.side == "long" and px <= a.limit_price) or (a.side == "short" and px >= a.limit_price))
+            if not hit:
+                keep.append(r)
+                continue
+            snap = self.snapshot(prices)
+            if len(snap.perps) >= self.cfg.risk.max_open_positions and a.coin not in {p.coin for p in snap.perps}:
+                self.state.record_order(cid, a.model_dump(), True, "limit canceled at trigger: position cap reached",
+                                        {"ok": False, "detail": "position cap reached before fill"})
+                self.notify.send(f"CANCELED limit {a.coin}: position cap reached before fill", "warning")
+                continue
+            res = self.venues["hl"].execute(a, {**prices, a.coin: px})
+            self.state.record_order(cid, a.model_dump(), True, r["reason"] + " | limit filled", res.model_dump())
+            self.notify.send(f"{'FILLED' if res.ok else 'FAILED'} limit {a.side} {a.coin} ${a.size_usd or 0:.0f} @ {a.limit_price}: {res.detail}",
+                             "info" if res.ok else "error")
+            if res.ok:
+                self.learner.record_open(self.trade_key(a), a, r.get("risk_usd") or 0.0, r.get("regime") or "",
+                                         (res.raw or {}).get("fill_px") or a.limit_price, r.get("view") or "")
+        self.state.set("resting_orders", keep)
 
     def _manage_due(self, snap: AccountSnapshot, perps_md: Dict, now: float) -> str:
         """Why the position manager should look now ('' = nothing). Shared by the 30s tick and the cycle."""
@@ -407,9 +471,7 @@ class Agent:
         market = market or {}
         if not l.skip_if_quiet:
             return ""
-        wr = self.state.get("wake_reason") or ""
-        if wr.startswith("watch level"):
-            self.state.set("wake_reason", "")
+        if getattr(self, "_wake", "").startswith("watch level"):
             return ""                                      # the model asked to be woken at this price - let it look
         # hard triggers: unprotected position or a position near its stop/TP.
         # With the position-manager brain enabled these are ITS wake conditions - the full entry agent stays asleep.
@@ -512,6 +574,9 @@ class Agent:
 
     # -------------------------------------------------------------------- cycle
     def cycle(self) -> None:
+        self._wake = self.state.get("wake_reason") or ""   # why this cycle ran ('' = heartbeat); journaled with the cycle
+        if self._wake:
+            self.state.set("wake_reason", "")
         last_snap = (self.state.get("live_snapshot") or {}).get("snapshot") or {}
         held_coins = {p.get("coin") for p in last_snap.get("perps", []) if p.get("coin")}
         market = self.md.gather(fast_extra=held_coins)
@@ -559,7 +624,7 @@ class Agent:
             self.researcher.annotate(market.get("prediction_markets", []))   # research only when we will actually ask the model
         if quiet_reason:
             log.info(f"[dim]quiet - LLM call skipped ({quiet_reason})[/]")
-            self.state.finish_cycle(cycle_id, "", {"skipped": quiet_reason, "actions": []})
+            self.state.finish_cycle(cycle_id, "", {"skipped": quiet_reason, "actions": [], "wake": self._wake})
             console.rule(f"[dim]equity ${snap.equity_usd:,.2f}  positions={snap.open_position_count}  (quiet)")
             return
         def _mark_llm_baselines():
@@ -598,14 +663,14 @@ class Agent:
             decision, raw = self.brain.propose(user_msg)
         except Exception as e:
             log.exception("LLM call failed")
-            self.state.finish_cycle(cycle_id, "", {}, error=str(e))
+            self.state.finish_cycle(cycle_id, "", {"wake": self._wake}, error=str(e))
             return
 
         if decision.market_view != "(proposer failed)":
             _mark_llm_baselines()                    # reset the attention clock only when the model actually answered
         log.info(f"[bold]view:[/] {decision.market_view}")
         if decision.watch_levels:
-            self.state.set("watch_levels", [w.model_dump() | {"ts": time.time()} for w in decision.watch_levels[:6]])
+            self.state.set("watch_levels", self._useful_watch_levels(decision.watch_levels, snap, time.time()))
         if decision.notes:
             log.info(f"[dim]notes: {decision.notes}[/]")
 
@@ -615,6 +680,13 @@ class Agent:
             self.learner.record_veto(a, prices.get(a.coin) if a.coin else None, why, by)   # shadow-simulate to score the rejecter
 
         def _execute(act: Action, reason: str, risk_usd: float) -> None:
+            if act.kind == "open_perp" and act.order_type == "limit" and act.limit_price:
+                mark = prices.get(act.coin)
+                if mark and ((act.side == "long" and act.limit_price < mark) or (act.side == "short" and act.limit_price > mark)):
+                    self._place_resting(act, reason, risk_usd, regime, decision.market_view, cycle_id)
+                    return
+                act = act.model_copy()
+                act.order_type = None                     # already marketable - just fill at market now
             venue = self.venues["pm"] if act.kind in PM_KINDS else self.venues["hl"]
             res: ExecResult = venue.execute(act, prices)
             self.state.record_order(cycle_id, act.model_dump(), True, reason, res.model_dump())
@@ -693,7 +765,8 @@ class Agent:
                 continue
             act = recheck.action
             reason = recheck.reason
-            entry_ref = prices.get(act.coin) if act.coin else None
+            entry_ref = act.limit_price if (act.kind == "open_perp" and act.order_type == "limit" and act.limit_price) \
+                else (prices.get(act.coin) if act.coin else None)
             if act.kind == "open_perp":
                 ok, why = self.risk.validate_stop_vs_entry(act, entry_ref)
                 if not ok:
@@ -726,7 +799,7 @@ class Agent:
         self._account_tokens()
         self.state.set("hold_streak", 0 if proposed_any else int(self.state.get("hold_streak") or 0) + 1)
 
-        self.state.finish_cycle(cycle_id, raw, decision.model_dump())
+        self.state.finish_cycle(cycle_id, raw, decision.model_dump() | {"wake": self._wake})
         snap = self.snapshot(prices)
         self.state.update_snapshot(cycle_id, snap.equity_usd, snap.model_dump())   # post-trade state -> dashboard sees fills now
         start = self.state.get("starting_equity") or snap.equity_usd

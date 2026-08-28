@@ -742,6 +742,15 @@
 
     const totalU = perps.reduce((a, p) => a + (p.unrealized_pnl || 0), 0) + pm.reduce((a, m) => a + ((m.cur_price - m.avg_price) * m.shares || 0), 0);
     $id('pos-summary').innerHTML = total ? `${total} open · unrealized <span class="${signClass(totalU)} num">${fmtUSD(totalU, true)}</span>` : '';
+
+    // "watching" strip — one-shot price alarms the model set for itself (status.watch_levels)
+    const watches = Array.isArray(state.status && state.status.watch_levels) ? state.status.watch_levels : [];
+    const strip = $id('watch-strip');
+    strip.hidden = !watches.length;
+    strip.innerHTML = watches.length ? `<span class="watch-label">watching</span>` + watches.map((w) => {
+      const below = String(w.direction).toLowerCase() === 'below';
+      return `<span class="watch-pill" title="${esc(w.note || '')}">👁 ${esc(w.coin)} <span class="watch-dir">${below ? '▼' : '▲'}</span> ${fmtPx(w.px)}</span>`;
+    }).join('') : '';
   }
 
   // Stop → TP track: where the current price sits between the stop and the take-profit, with distances from the mark.
@@ -1020,6 +1029,9 @@
         : c.error ? `<span class="tag tag-failed">ERROR</span><span class="sum-text sum-why">${esc(c.error.slice(0, 70))}</span>`
         : `<span class="tag tag-hold">HOLD</span><span class="sum-text sum-why">no actions this cycle</span>`).join('');
       if (viewItems.length > 2) summary += `<span class="sum-more">+${viewItems.length - 2} more</span>`;
+      // event-fired cycle: decision.wake says why it ran (empty/missing = scheduled heartbeat)
+      const wake = d.wake ? String(d.wake).trim() : '';
+      if (wake) summary += `<span class="wake-badge" title="${esc(wake)}">⚡ ${esc(wake.length > 60 ? wake.slice(0, 59) + '…' : wake)}</span>`;
       const rows = viewItems.filter((it) => !it.synthetic).map((it) => renderAction(it.a, it.o, it.cls));
       if (!rows.length) rows.push(kind === 'quiet'
         ? `<div class="action quiet"><span class="tag tag-quiet">QUIET</span><div class="action-body muted">Skipped by the attention gate — ${esc(skip)}</div></div>`
