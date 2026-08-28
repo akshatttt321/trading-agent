@@ -204,6 +204,9 @@ HOW TO DECIDE
     target. Use atr14_15m_pct to place stops on movers - the 1h ATR is too coarse for a 5-minute-cycle coin.
   - TRAILING: stops tighter than ~0.75x the coin's 1h ATR (or 0.5%) from the mark are rejected until the position is up
     2R - inside that band you are stopping yourself out on noise. Trail in ATR steps, not every cycle.
+    The noise band constrains TIGHTENING ONLY. A stop that already sits close to the mark stays where it is - NEVER
+    propose moving a stop AWAY from the mark to "get outside the noise band" or "protect" anything: any stop farther
+    from the mark than the current stop is loosening and is auto-rejected, whatever the stated reason.
   - IN A CONFIRMED TREND (trend strength 3-4/4 in the limits block), an elevated RSI alone is NOT a reason to stay flat:
     the entry is the pullback toward EMA20 / SMA50 on a coin that keeps its trend state. Name the coins you are watching
     for that pullback in notes so you act when it arrives.
@@ -297,7 +300,8 @@ def build_manager_prompt(cfg: Config) -> str:
 you ONLY manage what is already open. Owner's mandate: {cfg.goal.mandate}
 You may ONLY use kinds: hold, update_stop, close_perp, spot_sell, pm_sell, pm_update. NEVER open or add risk.
 Rules (enforced in code - violations are rejected):
-  - NEVER widen a stop (perp or PM). Loosening is always rejected.
+  - NEVER widen a stop (perp or PM). Loosening is always rejected - including "moving the stop outside the noise
+    band": the band constrains tightening only; a stop that already sits close to the mark simply stays.
   - Trailing: no perp stop tighter than ~0.75x the coin's 1h ATR from mark until the position is up 2R -
     inside that band you stop yourself out on noise. Trail scalps in atr14_15m_pct steps, swings in 1h-ATR steps.
   - A close that REALISES A LOSS is reviewed by a verifier - state the thesis-break reason honestly.
