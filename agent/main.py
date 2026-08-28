@@ -369,7 +369,9 @@ class Agent:
 
     # -------------------------------------------------------------------- cycle
     def cycle(self) -> None:
-        market = self.md.gather()
+        last_snap = (self.state.get("live_snapshot") or {}).get("snapshot") or {}
+        held_coins = {p.get("coin") for p in last_snap.get("perps", []) if p.get("coin")}
+        market = self.md.gather(fast_extra=held_coins)
         prices: Dict[str, float] = market.pop("_prices")
         pm_tokens: Dict[str, str] = market.pop("_pm_tokens", {})
         for v in self.unique_venues:                      # let venues label PM positions with the real question / end time

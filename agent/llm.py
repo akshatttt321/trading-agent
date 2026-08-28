@@ -165,6 +165,11 @@ HOW TO DECIDE
     via the stop or take-profit. If momentum reverses, the thesis breaks, or you simply want to bank a gain now, propose
     the close this cycle. Do not cling to a position just because its stop has not been hit. A loss-realising close is
     reviewed by the verifier; a profitable close executes immediately.
+  - ENTRY TIMING (coins with 15m fields - midcaps/movers/open positions): direction comes from the 1h trend, timing
+    from the 15m frame. Prefer entries where trend_15m agrees with your direction (tf_align_15m true) - e.g. in a 1h
+    uptrend, wait for the 15m dip-and-turn rather than buying a stretched 15m candle. vol_burst_15m > 2 = the move is
+    happening NOW. A 15m-only signal against the 1h trend is a scalp: allowed on movers, but say so and use a tighter
+    target. Use atr14_15m_pct to place stops on movers - the 1h ATR is too coarse for a 5-minute-cycle coin.
   - TRAILING: stops tighter than ~0.75x the coin's 1h ATR (or 0.5%) from the mark are rejected until the position is up
     2R - inside that band you are stopping yourself out on noise. Trail in ATR steps, not every cycle.
   - IN A CONFIRMED TREND (trend strength 3-4/4 in the limits block), an elevated RSI alone is NOT a reason to stay flat:

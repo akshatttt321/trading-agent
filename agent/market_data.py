@@ -187,6 +187,39 @@ class MarketData:
             "vol_ratio_24h": round(vol_ratio, 2) if vol_ratio else None,
         }
 
+    def fast_stats(self, coin: str) -> Dict:
+        """15m frame over the last 24h for fast coins (midcaps/movers/open positions): entry TIMING only.
+        Closed candles only (same rule as the 1h states) so values change at most once per 15 minutes."""
+        end = int(time.time() * 1000)
+        start = end - 24 * 3600 * 1000
+        try:
+            candles = self.info.candles_snapshot(coin, "15m", start, end)
+        except Exception as e:
+            log.warning(f"fast candles {coin}: {e}")
+            return {}
+        if len(candles) < 30:
+            return {}
+        partial = _f(candles[-1].get("T"), 0) > time.time() * 1000
+        if partial:
+            candles = candles[:-1]
+        closes = [_f(k["c"]) for k in candles]
+        highs = [_f(k["h"]) for k in candles]
+        lows = [_f(k["l"]) for k in candles]
+        last = closes[-1]
+        trs = [max(h - l, abs(h - closes[i - 1]), abs(l - closes[i - 1])) for i, (h, l) in enumerate(zip(highs, lows)) if i > 0]
+        atr = sum(trs[-14:]) / min(14, len(trs)) if trs else 0
+        ema20, ema50 = _ema(closes, 20)[-1], _ema(closes, 50)[-1]
+        sma20 = sum(closes[-20:]) / min(20, len(closes))
+        trend = "up" if (ema20 > ema50 and last > sma20) else "down" if (ema20 < ema50 and last < sma20) else "mixed"
+        vols = [_f(k["v"]) for k in candles]
+        burst = (sum(vols[-4:]) / 4) / (sum(vols) / len(vols)) if vols and sum(vols) else None  # last hour vs 24h avg
+        return {
+            "trend_15m": trend,
+            "rsi14_15m": _rsi(closes),
+            "atr14_15m_pct": round(atr / last * 100, 2) if last else None,
+            "vol_burst_15m": round(burst, 2) if burst else None,
+        }
+
     # ------------------------------------------------------------------- spot
     def spot_overview(self) -> Dict[str, Dict]:
         try:
@@ -300,13 +333,21 @@ class MarketData:
             log.warning(f"all_mids: {e}")
             return {}
 
-    def gather(self) -> Dict:
+    def gather(self, fast_extra: Optional[set] = None) -> Dict:
         perps = self.perp_overview()
         prev_oi = getattr(self, "_prev_oi", {})
         for coin in perps:
             perps[coin].update(self.candle_stats(coin))
             if coin in prev_oi and prev_oi[coin]:
                 perps[coin]["oi_chg_pct_since_last"] = round((perps[coin]["oi_musd"] / prev_oi[coin] - 1) * 100, 2)
+            bkt = self.cfg.universe.bucket_of(coin)
+            if bkt in ("midcaps", "movers") or coin in (fast_extra or ()):   # fast 15m frame: timing, not signal-key input
+                perps[coin].update(self.fast_stats(coin))
+                t15 = perps[coin].get("trend_15m")
+                t1h = "up" if (perps[coin].get("ema20_above_ema50") and perps[coin].get("above_sma50_1h")) else \
+                      "down" if (perps[coin].get("ema20_above_ema50") is False and not perps[coin].get("above_sma50_1h")) else "mixed"
+                if t15 in ("up", "down"):
+                    perps[coin]["tf_align_15m"] = (t15 == t1h)
             perps[coin]["signal"] = _signal_summary(perps[coin])
             perps[coin]["_key"] = _signal_key(perps[coin])   # for the attention gate; stripped before the prompt
         self._prev_oi = {c: v["oi_musd"] for c, v in perps.items()}
