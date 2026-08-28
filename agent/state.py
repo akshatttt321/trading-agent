@@ -79,6 +79,22 @@ class State:
                 pass
         return n
 
+    def chop_entries_today(self) -> int:
+        """Filled perp entries tagged [chop-entry] since UTC midnight - counter-trend entries taken while the
+        regime was chop. Resting-limit placements (not yet filled) are excluded; the eventual fill counts once."""
+        import calendar
+        t = time.gmtime()
+        midnight = calendar.timegm((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, 0))
+        n = 0
+        for (a, res) in self.db.execute("SELECT action, result FROM orders WHERE approved=1 AND ts>=?", (midnight,)):
+            try:
+                ad, rd = json.loads(a), json.loads(res or "{}")
+                if "[chop-entry]" in (ad.get("reason") or "") and rd.get("ok") and not rd.get("resting"):
+                    n += 1
+            except Exception:
+                pass
+        return n
+
     def last_cycle_id(self) -> int:
         row = self.db.execute("SELECT MAX(id) FROM cycles").fetchone()
         return int(row[0] or 0)

@@ -275,10 +275,21 @@ class RiskGate:
                 if waking < 1.5:
                     left = self.r.reentry_cooldown_min - (time.time() - blocks[bkey]) / 60
                     return Verdict(False, f"re-entry cooldown: {a.coin} {a.side} stopped out recently - {left:.0f}m left (a wake-up overrides)", a)
-            # chop-regime entry budget: chop is where stop-out churn happens
-            if regime.startswith("chop") and self.r.chop_max_entries_per_day:
-                if self.state.entries_today() >= self.r.chop_max_entries_per_day:
-                    return Verdict(False, f"chop regime: entry budget used ({self.r.chop_max_entries_per_day}/day) - trend regimes are uncapped", a)
+            # chop-regime entry budget, SCOPED: chop is where stop-out churn happens, but (a) PM buys never count,
+            # (b) a coin trending cleanly in the trade's direction (1h structure + 15m agree) is exempt - trend-following
+            # on a trending coin is not chop churn even when BTC is indecisive, (c) only counter-trend perp entries
+            # actually FILLED during chop eat the budget (tagged [chop-entry] on the action).
+            if regime.startswith("chop") and self.r.chop_max_entries_per_day and a.kind == "open_perp":
+                md_c = ((market or {}).get("perps", {}) or {}).get(a.coin) or {}
+                t1h_up = md_c.get("ema20_above_ema50") is True and md_c.get("above_sma50_1h")
+                t1h_dn = md_c.get("ema20_above_ema50") is False and not md_c.get("above_sma50_1h")
+                t15 = md_c.get("trend_15m")
+                aligned = (a.side == "long" and t1h_up and t15 in ("up", None)) or \
+                          (a.side == "short" and t1h_dn and t15 in ("down", None))
+                if not aligned:
+                    if self.state.chop_entries_today() >= self.r.chop_max_entries_per_day:
+                        return Verdict(False, f"chop budget: {self.r.chop_max_entries_per_day}/day counter-trend entries in chop used (trend-aligned and trend-regime entries are uncapped)", a)
+                    a.reason = (a.reason or "") + " [chop-entry]"
             # anti-chase: entering at the extreme of the band with extreme RSI is buying the top / selling the bottom
             md = ((market or {}).get("perps", {}) or {}).get(a.coin) or {}
             bb, rsi = md.get("bb_pos_1h"), md.get("rsi14_1h")
