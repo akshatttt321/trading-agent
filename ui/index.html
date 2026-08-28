@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Trading Agent</title>
+  <script>try{var t=localStorage.getItem('theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1115'/%3E%3Cpolyline points='4,24 11,17 16,20 22,10 28,13' fill='none' stroke='%233987e5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="demo-banner" class="banner banner-demo" hidden>
+  <span class="banner-tag">DEMO DATA</span>
+  <span id="demo-banner-text">No API configured. Open settings to connect to the agent.</span>
+  <button class="link-btn" id="demo-banner-settings" type="button">Settings</button>
+</div>
+<div id="error-banner" class="banner banner-error" hidden>
+  <span class="banner-tag">ERROR</span>
+  <span id="error-banner-text"></span>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><polyline points="4,24 11,17 16,20 22,10 28,13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="brand-name">trading-agent</span>
+    <span id="mode-badge" class="badge badge-mode" data-mode="paper">PAPER</span>
+    <span id="conn-dot" class="conn" data-state="demo" title="Connection state"><i></i><span id="conn-text">demo</span></span>
+  </div>
+  <div class="topbar-actions">
+    <span id="last-poll" class="muted small"></span>
+    <button id="theme-btn" class="icon-btn" type="button" title="Toggle light / dark theme" aria-label="Toggle theme">
+      <svg class="ico-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="refresh-btn" class="icon-btn" type="button" title="Refresh now" aria-label="Refresh">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="settings-btn" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="admin-btn" class="admin-btn" type="button" title="Admin panel (Google sign-in)" aria-label="Admin">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 12l1.8 1.8L15 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="admin-btn-text">Admin</span>
+    </button>
+    <button id="kill-btn" class="kill-btn" type="button" title="Emergency stop: flatten everything and halt the agent"><span class="kill-long">KILL SWITCH</span><span class="kill-short">KILL</span></button>
+  </div>
+</header>
+
+<main class="dash">
+
+  <!-- Panel 1: at-a-glance strip -->
+  <section class="panel status-panel" id="status-panel">
+    <div class="alerts" id="alerts"></div>
+    <div class="glance">
+      <div class="stat stat-hero">
+        <div class="stat-label">Equity <button class="help" type="button" data-help="equity" aria-label="What is equity?">?</button></div>
+        <div class="stat-value" id="st-equity">—</div>
+        <div class="stat-sub"><span id="st-pnl">—</span> <span class="muted">since start (<span id="st-start">—</span>)</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Today <button class="help" type="button" data-help="pnl_today" aria-label="What is today's PnL?">?</button></div>
+        <div class="stat-value" id="st-today">—</div>
+        <div class="stat-sub"><span id="st-today-pct" class="muted">—</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Open positions <button class="help" type="button" data-help="positions" aria-label="What counts as a position?">?</button></div>
+        <div class="stat-value" id="st-npos">—</div>
+        <div class="stat-sub"><span id="st-exposure" class="muted">—</span></div>
+      </div>
+      <div class="stat" id="st-llm-tile" hidden>
+        <div class="stat-label">LLM cost today <button class="help" type="button" data-help="llm_cost" aria-label="What is LLM cost?">?</button></div>
+        <div class="stat-value" id="st-llm-today">—</div>
+        <div class="stat-sub"><span id="st-llm-total" class="muted">—</span></div>
+        <div class="stat-sub stat-detail muted" id="st-llm-detail"></div>
+      </div>
+      <div class="stat stat-health">
+        <div class="stat-label">Agent <button class="help" type="button" data-help="health" aria-label="What does agent health mean?">?</button></div>
+        <div class="stat-value health-value"><span class="hdot" id="st-health-dot" data-state="ok" aria-hidden="true"></span><span id="st-health">—</span></div>
+        <div class="stat-sub"><span id="st-cycle-age" class="muted">—</span></div>
+        <div class="stat-sub"><span id="st-cycles" class="muted">—</span></div>
+      </div>
+    </div>
+    <div class="goal-row">
+      <div class="stat stat-wide">
+        <div class="stat-label">Multiple vs target <button class="help" type="button" data-help="multiple" aria-label="What is multiple vs target?">?</button></div>
+        <div class="stat-value"><span id="st-multiple">—</span><span class="muted stat-of"> / <span id="st-target">2.00x</span></span></div>
+        <div class="meter" id="multiple-meter" role="progressbar" aria-valuemin="0" aria-valuemax="2" aria-valuenow="1" aria-label="Progress toward target multiple">
+          <div class="meter-fill" id="multiple-fill"></div>
+          <div class="meter-tick" id="multiple-start-tick" title="Start (1.00x)"></div>
+        </div>
+        <div class="stat-sub"><span id="st-multiple-note" class="muted">—</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Horizon <button class="help" type="button" data-help="horizon" aria-label="What is the horizon?">?</button></div>
+        <div class="stat-value" id="st-day">—</div>
+        <div class="stat-sub"><span id="st-days-left" class="muted">—</span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Available <button class="help" type="button" data-help="available" aria-label="What is available?">?</button></div>
+        <div class="stat-value" id="st-available">—</div>
+        <div class="stat-sub"><span id="st-margin-note" class="muted">—</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Panel 2: equity curve -->
+  <section class="panel chart-panel">
+    <div class="panel-head">
+      <h2>Equity curve</h2>
+      <div class="panel-tools">
+        <span class="legend-key"><i class="swatch swatch-line"></i>equity</span>
+        <span class="legend-key"><i class="swatch swatch-dash"></i>start</span>
+        <span class="legend-key"><i class="swatch swatch-dash swatch-target"></i>target</span>
+        <span id="eq-range" class="muted small"></span>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="equity-chart" role="img" aria-label="Equity over time"></canvas>
+      <div id="equity-empty" class="empty" hidden>No equity data yet — the curve appears after the agent's first cycle.</div>
+    </div>
+  </section>
+
+  <!-- Panel 3: positions -->
+  <section class="panel positions-panel">
+    <div class="panel-head">
+      <h2>Open positions <span id="pos-sim" class="sim-badge" hidden>PAPER · simulated</span></h2>
+      <span id="pos-summary" class="muted small"></span>
+    </div>
+    <div id="pos-empty" class="empty-state" hidden>
+      <div class="empty-title">No positions open</div>
+      <div class="empty-sub">The agent is waiting for a setup that clears its risk-reward bar.</div>
+    </div>
+
+    <div id="perps-block">
+    <h3 class="sub-head">Perps <span class="count" id="perps-count"></span> <button class="help" type="button" data-help="perps" aria-label="What are perps?">?</button></h3>
+    <div class="table-wrap">
+      <table class="tbl num-tbl cards" id="perps-table">
+        <thead><tr>
+          <th>Coin</th><th class="r">Size</th><th class="r">Entry → Mark</th><th class="r">uPnL <button class="help" type="button" data-help="upnl" aria-label="What is unrealized PnL?">?</button></th><th>Stop → TP <button class="help" type="button" data-help="stop_tp" aria-label="What are stop and take-profit?">?</button></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    </div>
+
+    <div id="spot-block">
+    <h3 class="sub-head">Spot <span class="count" id="spot-count"></span></h3>
+    <div class="table-wrap">
+      <table class="tbl num-tbl cards" id="spot-table">
+        <thead><tr><th>Pair</th><th class="r">Amount</th><th class="r">Value</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    </div>
+
+    <div id="pm-block">
+    <h3 class="sub-head">Prediction markets <span class="count" id="pm-count"></span> <button class="help" type="button" data-help="pm" aria-label="What are prediction markets?">?</button></h3>
+    <div class="table-wrap">
+      <table class="tbl num-tbl cards" id="pm-table">
+        <thead><tr>
+          <th>Market</th><th class="r">Shares</th><th class="r">Avg → Cur</th><th class="r">Value</th><th class="r">uPnL</th><th>Stop → Target <button class="help" type="button" data-help="pm_stop_tp" aria-label="What are the PM stop and target?">?</button></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    </div>
+  </section>
+
+  <!-- Panel 3b: performance analytics (GET /api/analytics, polled every 60 s) -->
+  <section class="panel perf-panel" id="perf-panel">
+    <div class="panel-head">
+      <h2>Performance <button class="help" type="button" data-help="perf" aria-label="What is the performance panel?">?</button></h2>
+      <span id="perf-meta" class="muted small"></span>
+    </div>
+    <div id="perf-empty" class="empty-state" hidden>
+      <div class="empty-title">No performance data yet</div>
+      <div class="empty-sub">Stats appear after the agent's first cycle. Closed-trade statistics need at least one stop, take-profit or close.</div>
+    </div>
+    <div id="perf-body">
+      <div class="perf-tiles">
+        <div class="stat stat-sm">
+          <div class="stat-label">Realized PnL <button class="help" type="button" data-help="realized" aria-label="What is realized PnL?">?</button></div>
+          <div class="stat-value" id="pf-realized">—</div>
+          <div class="stat-sub muted" id="pf-realized-sub">—</div>
+        </div>
+        <div class="stat stat-sm">
+          <div class="stat-label">Unrealized <button class="help" type="button" data-help="upnl" aria-label="What is unrealized PnL?">?</button></div>
+          <div class="stat-value" id="pf-unrealized">—</div>
+          <div class="stat-sub muted" id="pf-unrealized-sub">—</div>
+        </div>
+        <div class="stat stat-sm">
+          <div class="stat-label">Win rate <button class="help" type="button" data-help="win_rate" aria-label="What is win rate?">?</button></div>
+          <div class="stat-value" id="pf-winrate">—</div>
+          <div class="stat-sub muted" id="pf-winrate-sub">—</div>
+        </div>
+        <div class="stat stat-sm">
+          <div class="stat-label">Profit factor <button class="help" type="button" data-help="profit_factor" aria-label="What is profit factor?">?</button></div>
+          <div class="stat-value" id="pf-pf">—</div>
+          <div class="stat-sub muted" id="pf-pf-sub">—</div>
+        </div>
+        <div class="stat stat-sm">
+          <div class="stat-label">Expectancy / trade <button class="help" type="button" data-help="expectancy" aria-label="What is expectancy?">?</button></div>
+          <div class="stat-value" id="pf-expect">—</div>
+          <div class="stat-sub muted" id="pf-expect-sub">—</div>
+        </div>
+        <div class="stat stat-sm">
+          <div class="stat-label">Max drawdown <button class="help" type="button" data-help="drawdown" aria-label="What is max drawdown?">?</button></div>
+          <div class="stat-value" id="pf-dd">—</div>
+          <div class="stat-sub muted" id="pf-dd-sub">—</div>
+        </div>
+        <div class="stat stat-sm">
+          <div class="stat-label">LLM cost / day <button class="help" type="button" data-help="llm_cost_day" aria-label="What is LLM cost per day?">?</button></div>
+          <div class="stat-value" id="pf-llm-day">—</div>
+          <div class="stat-sub muted" id="pf-llm-day-sub">—</div>
+        </div>
+        <div class="stat stat-sm" id="pf-pnl-llm-tile">
+          <div class="stat-label">PnL per $ of LLM <button class="help" type="button" data-help="pnl_per_llm" aria-label="What is PnL per dollar of LLM?">?</button></div>
+          <div class="stat-value" id="pf-pnl-llm">—</div>
+          <div class="stat-sub muted" id="pf-pnl-llm-sub">—</div>
+        </div>
+      </div>
+
+      <h3 class="sub-head">Activity <button class="help" type="button" data-help="activity" aria-label="What is the activity strip?">?</button></h3>
+      <div id="perf-activity" class="act-strip"></div>
+
+      <div class="perf-breakdowns">
+        <div>
+          <h3 class="sub-head">By venue</h3>
+          <div class="table-wrap"><table class="tbl num-tbl mini" id="bv-venue-table"><thead><tr><th>Venue</th><th class="r">Trades</th><th class="r">Win %</th><th class="r">PnL</th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div>
+          <h3 class="sub-head">By coin</h3>
+          <div class="table-wrap"><table class="tbl num-tbl mini" id="bv-coin-table"><thead><tr><th>Coin</th><th class="r">Trades</th><th class="r">Win %</th><th class="r">PnL</th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div>
+          <h3 class="sub-head">By close reason <button class="help" type="button" data-help="close_reason" aria-label="What is a close reason?">?</button></h3>
+          <div class="table-wrap"><table class="tbl num-tbl mini" id="bv-reason-table"><thead><tr><th>Reason</th><th class="r">Trades</th><th class="r">Win %</th><th class="r">PnL</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+
+      <div class="perf-lower">
+        <div>
+          <h3 class="sub-head">Daily PnL <button class="help" type="button" data-help="daily_pnl" aria-label="What is daily PnL?">?</button></h3>
+          <div class="daily-wrap">
+            <canvas id="daily-chart" role="img" aria-label="Daily PnL bars"></canvas>
+            <div id="daily-empty" class="empty" hidden>No daily data yet — a bar appears for each UTC day the agent has run.</div>
+          </div>
+        </div>
+        <div>
+          <h3 class="sub-head">Recent closed trades <span class="count" id="recent-count"></span></h3>
+          <div class="table-wrap">
+            <table class="tbl num-tbl cards" id="recent-table">
+              <thead><tr><th>When</th><th>Trade</th><th class="r">PnL</th><th>Closed by</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Panel 4: decision feed -->
+  <section class="panel feed-panel">
+    <div class="panel-head">
+      <h2>Decision feed <button class="help" type="button" data-help="feed" aria-label="What is the decision feed?">?</button></h2>
+    </div>
+    <!-- Two-level filter: venue tabs (Crypto / PM) over kind sub-chips. Each combination hits
+         GET /api/cycles?limit=30&venue=<tab>&kind=<chip> — server-side filtered on both axes. -->
+    <div class="feed-tabs" id="feed-tabs" role="tablist" aria-label="Venue">
+      <button class="ftab active" type="button" data-venue="crypto" role="tab" aria-selected="true">Crypto</button>
+      <button class="ftab" type="button" data-venue="pm" role="tab" aria-selected="false">PM</button>
+    </div>
+    <div class="fchips feed-subchips" id="feed-subchips" role="tablist" aria-label="Filter decisions">
+      <button class="fchip active" type="button" data-kind="all" role="tab" aria-selected="true">All</button>
+      <button class="fchip" type="button" data-kind="new" role="tab" aria-selected="false">New</button>
+      <button class="fchip" type="button" data-kind="updates" role="tab" aria-selected="false">Updates</button>
+      <button class="fchip" type="button" data-kind="rejected" role="tab" aria-selected="false">Rejected</button>
+      <button class="fchip" type="button" data-kind="holds" role="tab" aria-selected="false">Holds<span class="chip-global" title="Holds are venue-agnostic — the same across Crypto and PM">all markets</span></button>
+      <button class="fchip" type="button" data-kind="quiet" role="tab" aria-selected="false">Quiet<span class="chip-global" title="Quiet cycles are venue-agnostic — the same across Crypto and PM">all markets</span></button>
+      <button class="fchip" type="button" data-kind="errors" role="tab" aria-selected="false">Errors<span class="chip-global" title="Errors are venue-agnostic — the same across Crypto and PM">all markets</span></button>
+    </div>
+    <div class="muted small feed-hint">Tap a line to read the model's full reasoning. Newest first; each chip shows the latest 30 cycles of the selected venue and kind.</div>
+    <div id="feed" class="feed"></div>
+  </section>
+
+  <!-- Panel 5: learner -->
+  <section class="panel learner-panel">
+    <div class="panel-head">
+      <h2>Online learner <button class="help" type="button" data-help="learner" aria-label="What is the online learner?">?</button></h2>
+      <span id="learner-summary" class="muted small"></span>
+    </div>
+    <div id="learner-empty" class="empty-state" hidden>
+      <div class="empty-title">Learner has nothing to score yet</div>
+      <div class="empty-sub">It needs closed trades before it can rate which setups work. Scores appear after the first few exits.</div>
+    </div>
+    <div id="learner-body">
+    <div class="table-wrap">
+      <table class="tbl num-tbl cards" id="learner-table">
+        <thead><tr>
+          <th>Context <button class="help" type="button" data-help="context" aria-label="What is a context?">?</button></th><th class="r">Q <button class="help" type="button" data-help="q" aria-label="What is Q?">?</button></th><th class="r">n</th><th class="r">Win %</th><th class="r">Avg R <button class="help" type="button" data-help="r" aria-label="What is R?">?</button></th><th class="r">PnL</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <h3 class="sub-head">Lessons fed to the LLM</h3>
+    <pre id="lessons" class="lessons">—</pre>
+    <div id="learner-open" class="muted small"></div>
+    </div>
+    <div id="learner-extra">
+      <h3 class="sub-head">Rejection scoreboard <button class="help" type="button" data-help="rejection_scores" aria-label="What is the rejection scoreboard?">?</button></h3>
+      <div class="table-wrap">
+        <table class="tbl num-tbl cards" id="rejection-table">
+          <thead><tr><th>Rejecter</th><th class="r">Resolved</th><th class="r">Open</th><th class="r">Would have won</th><th class="r">Would have lost</th><th class="r">Avg R</th><th>Verdict</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <h3 class="sub-head">Post-mortems <span class="count" id="pmort-count"></span> <button class="help" type="button" data-help="postmortem" aria-label="What is a post-mortem?">?</button></h3>
+      <div id="postmortems" class="pmort-list"></div>
+
+      <h3 class="sub-head">Shadow trades <span class="count" id="shadow-count"></span> <button class="help" type="button" data-help="shadow" aria-label="What is a shadow trade?">?</button></h3>
+      <div class="fchips shadow-filters" id="shadow-filters" role="tablist" aria-label="Filter shadow trades by rejecter">
+        <button class="fchip active" type="button" data-by="all" role="tab" aria-selected="true">All</button>
+        <button class="fchip" type="button" data-by="verifier" role="tab" aria-selected="false">Verifier</button>
+        <button class="fchip" type="button" data-by="risk_gate" role="tab" aria-selected="false">Gate</button>
+        <button class="fchip" type="button" data-by="rr_model" role="tab" aria-selected="false">RR</button>
+      </div>
+      <div class="table-wrap">
+        <table class="tbl num-tbl cards" id="shadow-table">
+          <thead><tr><th>When</th><th>Trade</th><th>By</th><th>Status</th><th class="r">R</th><th class="r">Entry · Stop · TP</th><th class="r">Conf</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Panel 6: risk limits -->
+  <section class="panel risk-panel">
+    <div class="panel-head">
+      <h2>Risk limits <button class="help" type="button" data-help="risk" aria-label="What are risk limits?">?</button></h2>
+      <span id="risk-meta" class="muted small"></span>
+    </div>
+    <div id="risk-grid" class="kv-grid"></div>
+    <h3 class="sub-head">Risk-reward model <button class="help" type="button" data-help="rr" aria-label="What is the risk-reward model?">?</button></h3>
+    <div id="rr-grid" class="kv-grid"></div>
+    <h3 class="sub-head">Learner</h3>
+    <div id="learner-cfg-grid" class="kv-grid"></div>
+    <h3 class="sub-head">Universe</h3>
+    <div id="universe" class="chips"></div>
+  </section>
+
+</main>
+
+<footer class="foot muted small">
+  <span id="foot-api">API: not configured</span>
+  <span>Polls every 30 s · performance every 60 s</span>
+</footer>
+
+<!-- Admin panel (route #admin) -->
+<section id="admin-panel" class="admin" hidden aria-labelledby="admin-title">
+  <div class="admin-head">
+    <div class="admin-head-left">
+      <button id="admin-back" class="btn btn-ghost" type="button">&larr; Dashboard</button>
+      <h2 id="admin-title">Admin</h2>
+      <span id="admin-demo-tag" class="badge badge-demo" hidden title="Changes only affect the in-browser mock">DEMO</span>
+    </div>
+    <div class="admin-user" id="admin-user" hidden>
+      <span class="admin-avatar" id="admin-avatar" aria-hidden="true"></span>
+      <span class="admin-email" id="admin-email"></span>
+      <span class="muted small" id="admin-exp"></span>
+      <button class="link-btn" id="admin-signout" type="button">sign out</button>
+    </div>
+  </div>
+
+  <!-- Sign-in gate -->
+  <div id="admin-gate" class="admin-gate">
+    <div class="gate-card">
+      <h3>Sign in to manage the agent</h3>
+      <p class="muted">Admin actions (settings, secrets, restart, mode switch) require the Google account configured as <code>ADMIN_EMAIL</code> on the server. Viewing the dashboard does not.</p>
+      <div id="gsi-button" class="gsi-button"></div>
+      <button id="admin-demo-signin" class="btn btn-primary" type="button" hidden>Sign in (demo)</button>
+      <div id="admin-gate-msg" class="test-result" hidden></div>
+      <p class="muted small" id="admin-gate-hint"></p>
+    </div>
+  </div>
+
+  <!-- Signed-in body -->
+  <div id="admin-body" class="admin-body" hidden>
+    <div id="admin-notice" class="admin-notice" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="admin-notice-text"></span>
+      <button class="link-btn" id="admin-notice-close" type="button" aria-label="Dismiss">&times;</button>
+    </div>
+    <div class="admin-layout">
+      <nav class="admin-tabs" id="admin-tabs" aria-label="Admin sections"></nav>
+      <div class="admin-content">
+        <div id="admin-loading" class="muted small admin-loading">Loading settings…</div>
+        <div id="admin-error" class="test-result bad" hidden></div>
+        <div id="admin-result" class="result-card" hidden></div>
+        <div id="admin-sections" class="admin-sections"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sticky unsaved-changes bar -->
+  <div id="admin-savebar" class="savebar" hidden>
+    <span class="savebar-text" id="savebar-text"></span>
+    <span class="spacer"></span>
+    <button type="button" class="btn btn-ghost" id="savebar-discard">Discard</button>
+    <button type="button" class="btn btn-primary" id="savebar-save">Save</button>
+  </div>
+</section>
+
+<!-- Generic confirm modal (danger saves, restart, reset journal) -->
+<div class="modal" id="confirm-modal" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div class="modal-card" id="confirm-card">
+    <div class="modal-head">
+      <h2 id="confirm-title">Confirm</h2>
+      <button class="icon-btn" type="button" data-close="confirm-modal" aria-label="Close">&times;</button>
+    </div>
+    <div id="confirm-body" class="confirm-body"></div>
+    <label class="field" id="confirm-phrase-field" hidden>
+      <span>Type <code id="confirm-phrase-word">CONFIRM</code> to continue</span>
+      <input type="text" id="in-confirm-phrase" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    </label>
+    <div id="confirm-result" class="test-result" hidden></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-close="confirm-modal">Cancel</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-primary" id="confirm-ok-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- LIVE switch: 4-step flow -->
+<div class="modal" id="live-modal" hidden role="dialog" aria-modal="true" aria-labelledby="live-title">
+  <div class="modal-card modal-danger modal-wide">
+    <div class="modal-head">
+      <h2 id="live-title">Switch to LIVE trading</h2>
+      <button class="icon-btn" type="button" data-close="live-modal" aria-label="Close">&times;</button>
+    </div>
+    <p>Live mode sends <strong>real orders with real money</strong> on Hyperliquid and Polymarket. All four steps must pass before the switch is sent.</p>
+    <ol class="steps">
+      <li class="step" id="live-step-1" data-state="pending">
+        <div class="step-head"><span class="step-num">1</span><span class="step-title">Secrets present</span><span class="step-state"></span></div>
+        <div class="step-body" id="live-secrets"></div>
+      </li>
+      <li class="step" id="live-step-2" data-state="pending">
+        <div class="step-head"><span class="step-num">2</span><span class="step-title">Preflight passes</span><span class="step-state"></span></div>
+        <div class="step-body">
+          <button type="button" class="btn" id="live-preflight-btn">Run preflight</button>
+          <div id="live-preflight" class="checks"></div>
+        </div>
+      </li>
+      <li class="step" id="live-step-3" data-state="pending">
+        <div class="step-head"><span class="step-num">3</span><span class="step-title">Type the acknowledgement phrase</span><span class="step-state"></span></div>
+        <div class="step-body">
+          <code class="phrase" id="live-phrase"></code>
+          <input type="text" id="in-live-phrase" class="phrase-input" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="type the phrase exactly">
+        </div>
+      </li>
+      <li class="step" id="live-step-4" data-state="pending">
+        <div class="step-head"><span class="step-num">4</span><span class="step-title">Confirm what will change</span><span class="step-state"></span></div>
+        <div class="step-body">
+          <div id="live-changes" class="changes danger-list"></div>
+        </div>
+      </li>
+    </ol>
+    <div id="live-result" class="test-result" hidden></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-close="live-modal">Cancel</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-danger" id="live-go-btn" disabled>Switch to LIVE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div class="modal" id="settings-modal" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="icon-btn" type="button" data-close="settings-modal" aria-label="Close">&times;</button>
+    </div>
+    <form id="settings-form" autocomplete="off">
+      <label class="field">
+        <span>API base URL</span>
+        <input type="url" id="in-api-base" placeholder="https://dash.example.com" spellcheck="false">
+        <small class="muted">Root of the dashboard API (without <code>/api</code>). Leave blank for demo mode.</small>
+      </label>
+      <label class="field">
+        <span>Bearer token</span>
+        <input type="password" id="in-token" placeholder="DASHBOARD_TOKEN" spellcheck="false">
+        <small class="muted">Sent as <code>Authorization: Bearer &lt;token&gt;</code>. Stored in this browser's localStorage only.</small>
+      </label>
+      <div id="test-result" class="test-result" hidden></div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="test-conn-btn">Test connection</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" id="clear-settings-btn">Clear (demo)</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Kill modal -->
+<div class="modal" id="kill-modal" hidden role="dialog" aria-modal="true" aria-labelledby="kill-title">
+  <div class="modal-card modal-danger">
+    <div class="modal-head">
+      <h2 id="kill-title">Kill switch</h2>
+      <button class="icon-btn" type="button" data-close="kill-modal" aria-label="Close">&times;</button>
+    </div>
+    <p>This writes <code>data/KILL</code>. The agent will <strong>flatten every open position</strong> at market and stop within 5 seconds. It refuses to restart until the file is removed and the <code>killed</code> flag is cleared.</p>
+    <p id="kill-mode-line" class="kill-mode-line"></p>
+    <label class="field">
+      <span>Type <code>KILL</code> to confirm</span>
+      <input type="text" id="in-kill-confirm" placeholder="KILL" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    </label>
+    <div id="kill-result" class="test-result" hidden></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-close="kill-modal">Cancel</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-danger" id="kill-confirm-btn" disabled>Flatten &amp; kill</button>
+    </div>
+  </div>
+</div>
+
+<div id="help-pop" class="help-pop" hidden role="tooltip"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script src="mock.js"></script>
+<script src="app.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

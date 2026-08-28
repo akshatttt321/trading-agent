@@ -1,0 +1,25 @@
+# systemd unit for a VPS (Ubuntu/Debian). Install:
+#   sudo cp deploy/trading-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now trading-agent
+#   journalctl -u trading-agent -f
+[Unit]
+Description=Autonomous trading agent (Hyperliquid + Polymarket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/opt/trading-agent
+EnvironmentFile=/opt/trading-agent/.env
+ExecStart=/opt/trading-agent/.venv/bin/python -m agent.main
+Restart=always
+RestartSec=30
+# hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/trading-agent/data
+
+[Install]
+WantedBy=multi-user.target

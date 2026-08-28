@@ -1,0 +1,210 @@
+# ============================================================================
+# trading-agent configuration
+#
+# mode:
+#   paper   - simulated fills against REAL mainnet prices. No keys needed. Default.
+#   testnet - real orders on Hyperliquid TESTNET (fake USDC). Needs a testnet key.
+#   live    - REAL MONEY. Needs keys in .env AND the env var
+#             LIVE_TRADING_ACK=I_UNDERSTAND_THIS_IS_REAL_MONEY_AND_I_CAN_LOSE_ALL_OF_IT
+# ============================================================================
+mode: paper
+
+loop_interval_seconds: 300          # one cycle every 5 minutes (LLM cost scales with this)
+paper_starting_equity_usd: 150      # paper account size (applies on journal reset)
+
+llm:
+  # Two-model decision: the PROPOSER drafts actions, an independent VERIFIER (skeptic) must approve every
+  # risk-adding action and may only shrink size / tighten stops. Providers: gemini | openai | anthropic.
+  #   gemini    -> GEMINI_API_KEY from aistudio.google.com (FREE tier: ~10 req/min, a few hundred/day)
+  #   openai    -> OPENAI_API_KEY from platform.openai.com (pay-as-you-go; ChatGPT Go/Plus does NOT include it)
+  #   anthropic -> ANTHROPIC_API_KEY from console.anthropic.com (pay-as-you-go)
+  # Free-tier quotas (aistudio.google.com/rate-limit, per model per day): Flash Lite 500 RPD; 3.5/3.6/3.7 Flash 20 RPD each.
+  # So: the cheap Lite model screens every cycle (mostly HOLD); the strong 3.6 Flash audits only real trade
+  # proposals (a few per day). On 429 a call walks down the fallback chain (each model = separate quota).
+  # Paid tier (prepay credits): quotas are 10K+ requests/day, so DOLLARS are the constraint, not requests.
+  # thinking: none|minimal|low|medium|high - thought tokens are billed as output ($3.75/M on 3.x Flash). 3.6 Flash rejects
+  # "none" and falls to "minimal" (0 thought tokens); "low" was producing up to 6k thought tokens per call (~$0.025).
+  proposer: { provider: gemini, model: gemini-3.6-flash, thinking: minimal }                  # every cycle: no thinking
+  verifier: { provider: gemini, model: gemini-3.5-flash, enabled: true, thinking: low }        # 3.7-flash 504s under load; 3.5 is reliable and independent of the proposer
+  fallbacks:                        # walked on 429/503/504/deadline; ordered reliable-first, lite is the always-up guarantee
+    - { provider: gemini, model: gemini-3.6-flash }
+    - { provider: gemini, model: gemini-3.5-flash-lite }
+  # USD per 1M tokens [input, output] - used for the live cost estimate and the daily cap below
+  prices:
+    gemini-3.6-flash: [0.75, 3.75]
+    gemini-3.7-flash: [0.75, 3.75]
+    gemini-3.5-flash: [1.50, 9.00]
+    gemini-3.5-flash-lite: [0.30, 2.50]
+    gemini-pro-latest: [2.00, 12.00]
+  max_usd_per_day: 1.20             # reached -> model consulted only when a position nears its stop/TP, until next UTC day
+  # Soft daily budget for LLM calls; once reached the agent stops consulting the model while FLAT
+  # (open positions stay protected by exchange stops / the 60s watch and are still managed).
+  max_calls_per_day: 800
+  # stance: active       -> testing phase: take reasonable setups readily to generate closed-trade data for the learner
+  #         conservative -> real money: trade only clear asymmetric setups, HOLD is the default
+  stance: active
+  max_tokens: 4000
+  temperature: 0.2
+  # Quiet gate: skip the LLM call when there are no open positions AND no coin in the universe
+  # moved more than quiet_move_pct since the last LLM call. A call is always forced after
+  # max_quiet_minutes so the agent never goes blind for long. Cuts API spend 2-3x.
+  # --- adaptive attention: call the model when something CHANGED, not on a clock -------------------
+  # attention score = move/quiet_move_pct + signal flips + volume surge + uPnL swing; call when >= threshold.
+  # The maximum quiet interval scales with volatility: quiet_max_minutes in calm markets down to
+  # quiet_min_minutes in volatile ones. Hard triggers regardless: position within near_level_pct of a stop/TP.
+  skip_if_quiet: true
+  move_atr_fraction: 0.5            # a coin's move since the last look scores 1.0 at this fraction of ITS OWN 1h ATR
+  wakeup_expansion: 1.5             # coin 'wakes up' when its last-3h ATR / 14h ATR >= this: +1 attention, forced into the prompt
+  quiet_move_pct: 0.6               # fallback threshold (%) only when a coin has no ATR yet
+  attention_threshold: 1.3
+  # hold-streak throttle: each consecutive HOLD from the model raises the threshold by hold_streak_step (cap
+  # hold_streak_max_mult x) and stretches the forced-look interval; any real proposal resets the streak.
+  hold_streak_step: 0.25
+  hold_streak_max_mult: 3.0
+  quiet_min_minutes: 10             # forced look at least this often when volatility is high
+  quiet_max_minutes: 90             # ...and at most this long between looks when it is calm
+  vol_low_atr_pct: 0.3              # BTC 1h ATR% considered calm
+  vol_high_atr_pct: 1.5             # BTC 1h ATR% considered volatile
+  near_level_pct: 1.0               # with positions: always consult when within 1% of a stop/TP
+  dead_hours: [2, 6]                # UTC dead window (chop hours): attention threshold x dead_hour_mult
+  dead_hour_mult: 1.5
+  max_quiet_minutes: 60             # legacy hard ceiling (kept for compatibility)
+  history_cycles: 4                 # how many past decisions to show the model
+  # Prediction markets run on their OWN cadence (they resolve in days - no need to look every 5 min). Cost optimisation:
+  # PM markets/research are absent from the prompt except when a PM look is due, which also forces a cycle.
+  pm_interval_min: 30               # evaluate prediction markets at most this often
+  pm_move_trigger_pct: 10           # ...or sooner if a held PM token moves this much
+  verify_loss_exits: true           # pm_sell / close_perp that realise a loss also go through the verifier (fail-open if it is down)
+
+# The mandate given to the agent. It is placed verbatim in its instructions.
+goal:
+  target_multiple: 2.0              # 2x
+  horizon_days: 10                  # in 7-10 days
+  mandate: >
+    You are managing REAL MONEY belonging to a single individual. Your mandate
+    is to attempt to grow the account to 2x its starting equity within 7 to 10
+    days using any combination of perpetual futures, spot, and prediction
+    markets. You have full discretion over what to trade and when, within the
+    hard risk rules, which you cannot change or bypass. Losing the account is
+    the worst outcome; ending flat is far better than blowing up chasing the
+    target. Be selective: most cycles the correct action is HOLD.
+
+universe:
+  # perps are derived from the buckets below (union, in bucket order). Each bucket sets how often its coins are
+  # shown to the model (look_every_min), how many at most per cycle (max_shown) and how many positions it may hold.
+  # A coin is also shown whenever it has an open position or is the cycle's top mover / had a signal flip.
+  buckets:
+    majors:  { coins: [BTC, ETH],                                                     look_every_min: 30, max_shown: 2, max_positions: 1 }
+    midcaps: { coins: [SOL, HYPE, XRP, DOGE, SUI, ZEC, ENA, NEAR, AAVE, ADA, UNI, TAO],    look_every_min: 15, max_shown: 5, max_positions: 5 }
+    movers:  { coins: [PUMP, FARTCOIN, TRUMP, kPEPE, ZRO, LIT, PENGU, XPL, MON, WLD, CRV], look_every_min: 5,  max_shown: 4, max_positions: 4 }
+  perps: []                          # leave empty when buckets are used
+  spot:  ["HYPE/USDC", "PURR/USDC"]
+  prediction_markets:
+    enabled: true
+    max_days_to_resolution: 60
+    min_liquidity_usd: 25000
+    max_markets_shown: 8
+    # markets whose question mentions these are ranked first (the model has live price data for them)
+    prefer_keywords: [bitcoin, btc, ethereum, eth, solana, sol, xrp, doge, hype, crypto]
+    min_preferred: 4                  # try to fill at least this many of the shown slots with preferred markets
+    # --- odds / timing guards (rr_model) - a binary at 87c with hours left is a coin flip dressed as an edge
+    max_buy_price: 0.75               # never pay more than this per $1 payoff
+    min_hours_to_resolution: 12
+    min_strike_distance_pct: 2.0      # crypto price markets: current price must be this far from the strike
+    edge_slope: 0.2                   # required edge = pm_min_edge + (price - 0.5) * edge_slope  (70c token -> 7%)
+    # --- swing mode: trade the token PRICE with a stop and a target (like a perp), not the final verdict
+    swing_min_hours: 24               # swings need time value: no swing entries inside this many hours of resolution
+    swing_min_price: 0.08             # below this the spread eats the trade
+    swing_min_target_gap: 0.04        # target must be at least this far above entry (~5x a typical spread)
+    max_research_edge: 0.35           # non-crypto (research) markets: an edge above this is DOUBLE-CHECKED by a second
+                                      # skeptical web search; taken (sized on the capped edge) only if that search confirms
+                                      # the outcome and probability, otherwise rejected
+    # --- research: for NON-crypto markets (sports/politics/macro) the agent has no price data, so a grounded web
+    # search estimates the probability before it bets. Crypto price markets use live price data instead (no search).
+    research_enabled: true
+    research_model: gemini-3.5-flash-lite   # grounded google-search; big Flash models time out on grounding
+    research_per_cycle: 2                    # at most this many markets researched per cycle
+    research_cache_hours: 12                 # re-use a market's research for this long
+    research_max_usd_per_day: 0.30           # own daily budget for search calls
+
+# ============================================================================
+# HARD RISK RULES - enforced in code (agent/risk.py). The LLM proposes,
+# this layer approves/clamps/rejects. The LLM is told these limits but cannot
+# change or bypass them.
+# ============================================================================
+risk:
+  max_leverage: 10                   # per-position leverage cap
+  max_position_pct_equity: 60       # notional of one position, % of equity
+  max_gross_exposure_pct: 200       # sum of all notionals, % of equity
+  max_open_positions: 10            # = sum of bucket max_positions
+  max_daily_loss_pct: 15             # hit this -> no NEW risk until next UTC day
+  max_drawdown_pct: 25              # from starting equity -> FLATTEN + KILL
+  require_stop_loss: true           # every perp entry must carry a stop
+  max_stop_distance_pct: 6          # stop no further than 6% from entry
+  min_seconds_between_orders: 60
+  max_orders_per_hour: 12           # entries + closes; update_stop is NOT counted (stop moves must never block entries)
+  # trailing guard: a stop may not be moved closer than max(min_stop_atr_mult x 1h ATR, min_stop_pct) to the mark,
+  # except once the position is up >= breakeven_after_r R (then breakeven-plus is always allowed)
+  min_stop_atr_mult: 0.75
+  min_stop_pct: 0.5
+  breakeven_after_r: 2.0
+  tp_extend_min_confidence: 0.75    # a target may be extended only if the model states >= this confidence that the move continues
+  min_order_usd: 10
+  prediction_market_max_pct_equity: 10    # per market
+  prediction_market_max_total_pct: 25     # across all PM positions
+  min_equity_usd: 20                # below this the agent stops trading
+  # --- correlation / staleness / carry (added after day-1 review) ---
+  # Same-direction perps allowed, graded by measured TREND STRENGTH 0..4 in that direction:
+  #   +1 if >=50% of the universe trends that way (EMA20 vs EMA50 & price vs SMA50), +1 more if >=75%,
+  #   +1 if BTC's regime agrees, +1 if BTC 24h momentum agrees (> +2% for longs / < -2% for shorts)
+  same_direction_caps: [5, 6, 7, 8, 9]   # index = strength 0,1,2,3,4
+  max_same_direction_risk_pct: 20    # the real guard: combined $-at-risk (to stops) of same-direction perps, % of equity
+  max_position_age_hours: 48        # positions older than this are force-closed (0 = off)
+  max_adverse_funding_pct_8h: 0.05  # refuse NEW positions paying more than this per 8h in funding
+  # anti-chase: don't open a long into the top of the band / overbought (mirror for shorts). 0 disables.
+  anti_chase_bb: 0.9                # Bollinger position beyond which an entry is "chasing" (longs >0.9, shorts <0.1)
+  anti_chase_rsi: 72                # ...combined with RSI beyond this (longs >72, shorts <28)
+  min_entry_stop_atr_mult: 1.0      # initial stop must be at least this x 1h ATR from entry (noise can't clip it)
+  # --- trade management (equity-curve throttle / re-entry cooldown / scale-out / chop budget) ---
+  loss_streak_throttle: 0.5         # after 2 consecutive stop-outs, new-position size x this for loss_streak_hours
+  loss_streak_hours: 6
+  losing_day_mult: 0.75             # day after a losing day: new-position size x this
+  reentry_cooldown_min: 120         # after a stop-out, no re-entry same coin+direction for this long (unless it wakes up)
+  scale_out_r: 1.5                  # at +1.5R: close scale_out_frac, stop to breakeven, trail the rest (0 disables)
+  scale_out_frac: 0.5
+  chop_max_entries_per_day: 2       # in a chop regime, at most this many new entries per UTC day
+  beta_weighted_risk: true          # same-direction risk budget weights each position by its |beta| to BTC
+
+# Paper-fill realism (Hyperliquid taker ~4.5 bps; thin alts slip more than majors)
+paper:
+  fee_bps: 4.5
+  slippage_bps: 8
+  pm_slippage_cents: 1.0            # per side, on outcome tokens (thin books)
+
+# ============================================================================
+# RISK-REWARD MODEL - every risk-adding trade must pass these (agent/rr_model.py)
+# ============================================================================
+rr:
+  min_reward_risk: 1.3              # |tp-entry| / |entry-stop| must be >= this (1.5+ recommended for live)
+  max_risk_per_trade_pct: 10.0       # a stop-out may cost at most this % of equity
+  kelly_fraction: 0.5              # fractional Kelly on the LLM's stated confidence
+  pm_min_edge: 0.03                 # PM: confidence must exceed market price by this (0.05+ for live)
+
+# ============================================================================
+# ONLINE REINFORCEMENT LEARNER - scores closed trades (R-multiples) per setup
+# context, adjusts size multipliers, feeds lessons back to the LLM (agent/learner.py)
+# ============================================================================
+learner:
+  enabled: true
+  postmortems: true                 # after each close, a cheap model writes a 2-line lesson (1 small call per close)
+  postmortems_shown: 10             # how many recent lessons the proposer sees
+  shadow_vetoes: true               # paper-simulate trades the verifier vetoed to score the verifier
+  shadow_expiry_hours: 48
+  alpha: 0.25                       # EMA step for Q(context) updates
+  min_samples: 3                    # explore (multiplier 1.0) until this many closes
+  min_multiplier: 0.25
+  max_multiplier: 1.0
+
+notify:
+  telegram: true                    # active automatically once TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID secrets are set
+  min_level: info                   # info = fills/closes too; warning = rejections/halts/kill only

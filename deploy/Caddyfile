@@ -1,0 +1,15 @@
+# Automatic HTTPS for the dashboard API. DASHBOARD_HOST comes from .env (e.g. 1-2-3-4.sslip.io).
+{$DASHBOARD_HOST} {
+	encode gzip
+	@api path /api/*
+	handle @api {
+		reverse_proxy api:8000
+	}
+	handle {
+		respond "trading-agent api" 200
+	}
+	log {
+		output stdout
+		format console
+	}
+}

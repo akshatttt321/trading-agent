@@ -1,0 +1,56 @@
+# From the repo root:  docker compose -f deploy/docker-compose.yml up -d --build
+# Logs:                docker compose -f deploy/docker-compose.yml logs -f agent
+# Kill switch:         touch data/KILL   (agent flattens and exits; container restarts and refuses to trade)
+#
+# Services:
+#   agent  - the trading loop
+#   api    - read-only dashboard API + kill endpoint (agent/api.py), same journal volume
+#   caddy  - HTTPS reverse proxy for the API with automatic Let's Encrypt certs (needs DASHBOARD_HOST in .env)
+services:
+  agent:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    image: trading-agent:latest
+    env_file: ../.env
+    volumes:
+      - ../data:/app/data
+      - ../config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: "50m", max-file: "5" } }
+
+  api:
+    image: trading-agent:latest
+    depends_on: [agent]
+    env_file: ../.env
+    command: ["uvicorn", "agent.api:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    volumes:
+      - ../data:/app/data
+      - ../config.yaml:/app/config.yaml          # rw: the admin panel writes settings here
+    expose: ["8000"]
+    restart: unless-stopped
+
+  watchdog:
+    image: trading-agent:latest
+    depends_on: [agent, api]
+    env_file: ../.env
+    environment:
+      - WATCHDOG_API=http://api:8000
+    command: ["python", "watchdog/watchdog.py"]
+    volumes:
+      - ../data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock   # to restart the agent container (never kills positions)
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on: [api]
+    env_file: ../.env
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
