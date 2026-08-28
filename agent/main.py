@@ -352,6 +352,7 @@ class Agent:
             return False
         self.state.set("last_manage_ts", now)
         self.state.set("last_manage_prices", {p.coin: p.mark_px for p in snap.perps})
+        self.state.set("manage_seen_levels", {p.coin: f"{p.stop_px}|{p.tp_px}" for p in snap.perps})
         self.state.set("last_manage_upnl", sum(p.unrealized_pnl for p in snap.perps))
         log.info(f"[bold]manage[/] ({due}): {decision.market_view}")
         self._managed = {"due": due, "view": (decision.market_view or "")[:200],
@@ -469,8 +470,13 @@ class Agent:
             ref = last_px.get(p.coin)
             if ref and abs(p.mark_px / ref - 1) * 100 >= atr15 * l.manager_min_move_atr15:
                 return f"{p.coin} moved {abs(p.mark_px / ref - 1) * 100:.2f}%"
+            # near-level is ONE-SHOT per (coin, stop, tp): the level executes deterministically on the tick anyway,
+            # so the manager looks once per level - re-armed only when the stop/TP changes. Without this, a tight
+            # trailing stop keeps the position permanently "near" and burns a manager call every cycle.
+            seen = self.state.get("manage_seen_levels") or {}
+            key = f"{p.stop_px}|{p.tp_px}"
             for lvl in (p.stop_px, p.tp_px):
-                if lvl and abs(p.mark_px - lvl) / p.mark_px * 100 < l.near_level_pct:
+                if lvl and abs(p.mark_px - lvl) / p.mark_px * 100 < l.near_level_pct and seen.get(p.coin) != key:
                     return f"{p.coin} near stop/TP"
         last_upnl = self.state.get("last_manage_upnl")
         upnl = sum(p.unrealized_pnl for p in snap.perps)
