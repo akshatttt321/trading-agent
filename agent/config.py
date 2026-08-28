@@ -45,6 +45,12 @@ class LLMCfg(BaseModel):
     quiet_max_minutes: int = 60
     dead_hours: List[int] = Field(default_factory=lambda: [2, 6])   # [start,end) UTC: attention threshold x dead_hour_mult
     dead_hour_mult: float = 1.5
+    # --- position-manager brain (2nd agent): cheap model that reviews OPEN positions on its own fast cadence ---
+    manager_enabled: bool = True
+    manager: ModelRef = Field(default_factory=lambda: ModelRef(provider="gemini", model="gemini-3.5-flash-lite", thinking="minimal"))
+    manager_interval_min: int = 10           # max minutes between manager looks while positions are open
+    manager_min_move_atr15: float = 0.5      # wake early: held coin moved this x its 15m ATR since last look
+    manager_min_upnl_swing_pct: float = 0.4  # wake early: total uPnL swung this % of equity
     vol_low_atr_pct: float = 0.3
     vol_high_atr_pct: float = 1.5
     history_cycles: int = 5

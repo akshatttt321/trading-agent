@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .config import DATA_DIR, KILL_FILE, ROOT, Config, load_config
 from .learner import Learner, regime_tag
-from .llm import Brain, build_user_message
+from .llm import build_manager_message, Brain, build_user_message
 from .market_data import MarketData
 from .models import AccountSnapshot, Action, ExecResult
 from .notify import Notifier, console, log
@@ -263,6 +263,98 @@ class Agent:
             ts[c] = now; px[c] = prices.get(c, px.get(c)); key[c] = (market.get("perps", {}).get(c) or {}).get("_key")
         self.state.set("shown_ts", ts); self.state.set("shown_px", px); self.state.set("shown_key", key)
 
+    def _manage_positions(self, snap: AccountSnapshot, prices: Dict[str, float], market: Dict,
+                          cycle_id: int, cycle_start_ts: float, funding: Dict, regime: str) -> bool:
+        """Second brain: cheap position manager on its own fast cadence. Entry decisions stay with the (expensive)
+        entry agent behind the attention gate; open positions get LLM judgement even on quiet cycles."""
+        l = self.cfg.llm
+        if not (l.manager_enabled and self.brain.manager):
+            return False
+        if not (snap.perps or snap.pm or snap.spot):
+            return False
+        today = self.state.get("tokens_today") or {}
+        if today.get("day") == time.strftime("%Y-%m-%d", time.gmtime()) and today.get("cost_usd", 0.0) >= l.max_usd_per_day:
+            return False                                       # spend cap: deterministic housekeeping still protects
+        now = time.time()
+        last_ts = self.state.get("last_manage_ts") or 0
+        last_px = self.state.get("last_manage_prices") or {}
+        perps_md = market.get("perps", {})
+        due = ""
+        if now - last_ts >= l.manager_interval_min * 60:
+            due = f"interval {l.manager_interval_min}m"
+        for p in snap.perps:
+            if due:
+                break
+            if p.stop_px is None:
+                due = f"{p.coin} unprotected"
+                break
+            atr15 = (perps_md.get(p.coin) or {}).get("atr14_15m_pct") or (perps_md.get(p.coin) or {}).get("atr14_1h_pct") or 1.0
+            ref = last_px.get(p.coin)
+            if ref and abs(p.mark_px / ref - 1) * 100 >= atr15 * l.manager_min_move_atr15:
+                due = f"{p.coin} moved {abs(p.mark_px / ref - 1) * 100:.2f}%"
+                break
+            for lvl in (p.stop_px, p.tp_px):
+                if lvl and abs(p.mark_px - lvl) / p.mark_px * 100 < l.near_level_pct:
+                    due = f"{p.coin} near stop/TP"
+                    break
+        if not due:
+            last_upnl = self.state.get("last_manage_upnl")
+            upnl = sum(p.unrealized_pnl for p in snap.perps)
+            if last_upnl is not None and snap.equity_usd and abs(upnl - last_upnl) >= snap.equity_usd * l.manager_min_upnl_swing_pct / 100:
+                due = f"uPnL swing ${upnl - last_upnl:+.2f}"
+        if not due:
+            return False
+        msg = build_manager_message(self.cfg, snap, market, self.state.get("starting_equity") or snap.equity_usd)
+        try:
+            decision, _raw = self.brain.propose_manage(msg)
+        except Exception:
+            log.exception("manager call failed")
+            return False
+        self.state.set("last_manage_ts", now)
+        self.state.set("last_manage_prices", {p.coin: p.mark_px for p in snap.perps})
+        self.state.set("last_manage_upnl", sum(p.unrealized_pnl for p in snap.perps))
+        log.info(f"[bold]manage[/] ({due}): {decision.market_view}")
+        acted = False
+        loss_exits: List[Tuple[Action, str]] = []
+        for a in decision.actions:
+            if a.kind == "hold" or a.kind in RISK_ADDING:
+                continue
+            verdict = self.risk.evaluate(a, snap, cycle_start_ts, funding, regime, market)
+            if not verdict.approved:
+                self.notify.send(f"REJECTED (manager) {a.kind} {a.coin or a.outcome or ''}: {verdict.reason}", "warning")
+                self.state.record_order(cycle_id, a.model_dump(), False, "manager: " + verdict.reason, {})
+                continue
+            if l.verify_loss_exits and self._is_loss_exit(verdict.action, snap):
+                loss_exits.append((verdict.action, verdict.reason))
+                continue
+            self._exec_managed(verdict.action, "manager: " + verdict.reason, cycle_id, prices)
+            acted = True
+        if loss_exits:
+            approved_ix, vetoed_ix = self.brain.verify(msg, [act for act, _ in loss_exits], decision.market_view)
+            if self.brain.last_verify_failed:                  # fail-open: never trap a losing position behind an outage
+                approved_ix = list(enumerate([act for act, _ in loss_exits]))
+                vetoed_ix = []
+                log.warning("verifier unavailable - manager loss exits executed without review (fail-open)")
+            for i, act in approved_ix:
+                self._exec_managed(act, "manager: " + loss_exits[i][1] + " | verifier approved loss exit", cycle_id, prices)
+                acted = True
+            for i, a, why in vetoed_ix:
+                self.notify.send(f"REJECTED (manager) {a.kind} {a.coin or ''}: {why} (loss exit vetoed - position kept)", "warning")
+                self.state.record_order(cycle_id, a.model_dump(), False, "manager loss exit vetoed: " + why, {})
+        self._account_tokens()                                 # manager tokens booked now; propose() resets the counter later
+        return acted
+
+    def _exec_managed(self, act: Action, reason: str, cycle_id: int, prices: Dict[str, float]) -> None:
+        venue = self.venues["pm"] if act.kind in PM_KINDS else self.venues["hl"]
+        res: ExecResult = venue.execute(act, prices)
+        self.state.record_order(cycle_id, act.model_dump(), True, reason, res.model_dump())
+        self.notify.send(f"{'FILLED' if res.ok else 'FAILED'} {act.kind} {act.coin or act.outcome or ''}: {res.detail}  [{reason}]",
+                         "info" if res.ok else "error")
+        if res.ok and res.raw and "realized_pnl" in res.raw:
+            lesson = self.learner.record_close(self.trade_key(act), float(res.raw["realized_pnl"]), (res.raw or {}).get("fill_px"), "manager close")
+            if lesson:
+                log.info(lesson)
+
     def _quiet_reason(self, snap: AccountSnapshot, prices: Dict[str, float], market: Optional[Dict] = None) -> str:
         """Non-empty string => skip the LLM this cycle. Adaptive: an attention score built from free market data
         decides whether anything is worth a (paid) look; the maximum quiet interval shrinks with volatility."""
@@ -270,13 +362,15 @@ class Agent:
         market = market or {}
         if not l.skip_if_quiet:
             return ""
-        # hard triggers: unprotected position or a position near its stop/TP
-        for p in snap.perps:
-            if p.stop_px is None:
-                return ""
-            for lvl in (p.stop_px, p.tp_px):
-                if lvl and abs(p.mark_px - lvl) / p.mark_px * 100 < l.near_level_pct:
+        # hard triggers: unprotected position or a position near its stop/TP.
+        # With the position-manager brain enabled these are ITS wake conditions - the full entry agent stays asleep.
+        if not l.manager_enabled:
+            for p in snap.perps:
+                if p.stop_px is None:
                     return ""
+                for lvl in (p.stop_px, p.tp_px):
+                    if lvl and abs(p.mark_px - lvl) / p.mark_px * 100 < l.near_level_pct:
+                        return ""
         today = self.state.get("tokens_today") or {}
         if today.get("day") == time.strftime("%Y-%m-%d", time.gmtime()):
             if today.get("calls", 0) >= l.max_calls_per_day:
@@ -402,6 +496,9 @@ class Agent:
         funding = {c: (v.get("funding_8h_pct") or 0.0) for c, v in market.get("perps", {}).items()}
         self._close_stale(snap, prices, cycle_id)
         snap = self.snapshot(prices)
+        # -------- 2nd brain: position manager (cheap, fast cadence, runs even on quiet cycles) --------
+        if self._manage_positions(snap, prices, market, cycle_id, cycle_start_ts, funding, regime):
+            snap = self.snapshot(prices)                     # manager closed/changed something
 
         # ---- bucket scheduling + quiet gate: don't pay for an LLM call when there is nothing to decide ------
         shown = self._select_shown(snap, prices, market)

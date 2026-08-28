@@ -69,6 +69,18 @@ VERDICT_SCHEMA = {
 
 RISK_ADDING = {"open_perp", "spot_buy", "pm_buy"}
 EXITS = {"close_perp", "pm_sell", "spot_sell"}
+MANAGE_KINDS = {"hold", "close_perp", "update_stop", "spot_sell", "pm_sell", "pm_update"}
+_MANAGE_ACTION = json.loads(json.dumps(ACTION_SCHEMA))          # deep copy
+_MANAGE_ACTION["properties"]["kind"]["enum"] = sorted(MANAGE_KINDS)
+MANAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "market_view": {"type": "string", "description": "1-3 sentences: how the open positions look right now."},
+        "actions": {"type": "array", "description": "Management actions only. Empty = everything placed right.", "items": _MANAGE_ACTION},
+        "notes": {"type": "string"},
+    },
+    "required": ["market_view", "actions"],
+}
 
 
 def rules_block(cfg: Config) -> str:
@@ -260,6 +272,38 @@ def build_user_message(cfg: Config, snap: AccountSnapshot, market: Dict, history
             "\n\nDecide for this cycle.")
 
 
+def build_manager_prompt(cfg: Config) -> str:
+    return f"""You are the POSITION MANAGER for a trading account (mode={cfg.mode}). A separate agent opens trades;
+you ONLY manage what is already open. Owner's mandate: {cfg.goal.mandate}
+You may ONLY use kinds: hold, update_stop, close_perp, spot_sell, pm_sell, pm_update. NEVER open or add risk.
+Rules (enforced in code - violations are rejected):
+  - NEVER widen a stop (perp or PM). Loosening is always rejected.
+  - Trailing: no perp stop tighter than ~0.75x the coin's 1h ATR from mark until the position is up 2R -
+    inside that band you stop yourself out on noise. Trail scalps in atr14_15m_pct steps, swings in 1h-ATR steps.
+  - A close that REALISES A LOSS is reviewed by a verifier - state the thesis-break reason honestly.
+  - update_stop: stop_loss_px and/or take_profit_px on the named coin. pm_update: TOKEN-price stop/target on token_id.
+Judgement guide: move the stop to breakeven after +1R; trail winners while the 15m trend holds; close on thesis break
+or momentum reversal instead of waiting for the stop; bank stalled winners - capital parked in a dead trade is a cost
+(the mandate rewards speed). A scalp that lost its 15m trend (tf_align_15m false, trend_15m against you) is done.
+Do NOT churn: if the stops are right and the trade is working, reply actions=[] or hold.
+Every action needs: reason (short) and confidence (honest 0-1)."""
+
+
+def build_manager_message(cfg: Config, snap: AccountSnapshot, market: Dict, start_equity: float) -> str:
+    c = (",", ":")
+    KEEP = ("mark", "funding_8h_pct", "signal", "chg_1h_pct", "chg_24h_pct", "atr14_1h_pct", "rsi14_1h", "bb_pos_1h",
+            "vol_expansion", "high_24h", "low_24h", "trend_15m", "rsi14_15m", "atr14_15m_pct", "vol_burst_15m", "tf_align_15m")
+    coins = {p.coin for p in snap.perps}
+    md = {cn: {k: v for k, v in (market.get("perps", {}).get(cn) or {}).items() if k in KEEP} for cn in coins}
+    goal = {"equity_usd": round(snap.equity_usd, 2),
+            "multiple": round(snap.equity_usd / start_equity, 4) if start_equity else 1.0,
+            "target_multiple": cfg.goal.target_multiple}
+    return ("## OPEN POSITIONS (full account)\n" + json.dumps(snap.model_dump(), separators=c) +
+            "\n\n## HELD-COIN MARKET DATA (1h regime, 15m timing)\n" + json.dumps(md, separators=c) +
+            "\n\n## GOAL\n" + json.dumps(goal, separators=c) +
+            "\n\nReview the open positions now. actions=[] if everything is placed right.")
+
+
 class Brain:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -268,10 +312,14 @@ class Brain:
         self.verifier = None
         if l.verifier.enabled:
             self.verifier = make_provider(l.verifier.provider, l.verifier.model, cfg.key_for(l.verifier.provider), l.max_tokens, 0.1, l.verifier.thinking)
+        self.manager = None
+        if l.manager_enabled:
+            self.manager = make_provider(l.manager.provider, l.manager.model, cfg.key_for(l.manager.provider), l.max_tokens, 0.15, l.manager.thinking)
         self.fallbacks = [make_provider(f.provider, f.model, cfg.key_for(f.provider), l.max_tokens, l.temperature, f.thinking)
                           for f in l.fallbacks if f.enabled and cfg.key_for(f.provider)]
         self.system = build_proposer_prompt(cfg)
         self.verifier_system = build_verifier_prompt(cfg)
+        self.manager_system = build_manager_prompt(cfg)
         self.last_usage: Dict[str, int] = Usage().as_dict()
         self.last_calls: List[Tuple[str, Usage]] = []   # (model, usage) per API call this cycle
         self.last_verify_failed = False
@@ -386,6 +434,31 @@ class Brain:
         self._usage = usage
         self.last_usage = usage.as_dict()
         return decision, raw
+
+    def propose_manage(self, user_msg: str) -> Tuple[Decision, str]:
+        """Position-manager brain: cheap model, management-only action set. Usage accounting mirrors propose()."""
+        self.last_calls = []
+        usage = Usage()
+        msg = user_msg
+        for attempt in range(2):
+            c = self._call(self.manager, self.manager_system, msg, MANAGE_SCHEMA, "submit_management")
+            usage.add(c.usage)
+            if c.error or c.data is None:
+                log.warning(f"manager attempt {attempt+1}: {c.error}")
+                continue
+            try:
+                d = Decision.model_validate(c.data)
+                d.actions = [a for a in d.actions if a.kind in MANAGE_KINDS]   # belt and braces
+                self._usage = usage
+                self.last_usage = usage.as_dict()
+                return d, c.raw
+            except ValidationError as e:
+                log.warning(f"manager output invalid (attempt {attempt+1}): {e}")
+                msg = user_msg + f"\n\nYour previous JSON failed validation, fix it: {e}"
+        log.error("manager failed twice; positions rely on deterministic housekeeping this cycle")
+        self._usage = usage
+        self.last_usage = usage.as_dict()
+        return Decision(market_view="(manager failed)", actions=[]), "{}"
 
     def verify(self, user_msg: str, actions: List[Action], market_view: str, held_same_side: set = frozenset()) -> Tuple[List[Tuple[int, Action]], List[Tuple[int, Action, str]]]:
         """Step 2: verifier on gate-approved actions. Index-keyed results so callers never rely on object identity
