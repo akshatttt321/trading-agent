@@ -201,14 +201,24 @@ class OpenAIProvider(Provider):
             return Completion(None, "", Usage(), f"openai error: {e}")
 
 
-PROVIDERS = {"anthropic": AnthropicProvider, "gemini": GeminiProvider, "openai": OpenAIProvider}
+class OpenRouterProvider(OpenAIProvider):
+    """OpenRouter (openrouter.ai): one key, many vendors (x-ai/grok, deepseek, ...), OpenAI-compatible."""
+    name = "openrouter"
+
+    def __init__(self, *a, **k):
+        Provider.__init__(self, *a, **k)
+        import openai
+        self.client = openai.OpenAI(api_key=self.api_key, base_url="https://openrouter.ai/api/v1")
+
+
+PROVIDERS = {"anthropic": AnthropicProvider, "gemini": GeminiProvider, "openai": OpenAIProvider, "openrouter": OpenRouterProvider}
 
 
 def make_provider(name: str, model: str, api_key: Optional[str], max_tokens: int, temperature: float, thinking: str = "minimal") -> Provider:
     if name not in PROVIDERS:
         raise SystemExit(f"unknown llm provider {name!r}; choose one of {list(PROVIDERS)}")
     if not api_key:
-        env = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}[name]
+        env = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}[name]
         raise SystemExit(f"{env} is not set in .env (required for provider {name!r})")
     log.info(f"llm provider {name}:{model} thinking={thinking}")
     return PROVIDERS[name](model, api_key, max_tokens, temperature, thinking)

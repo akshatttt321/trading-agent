@@ -20,7 +20,7 @@ SECRETS_PATH = DATA_DIR / "secrets.env"
 RESTART_FILE = DATA_DIR / "RESTART"
 
 SECRET_KEYS = [
-    "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "YDC_API_KEY",
+    "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "YDC_API_KEY", "OPENROUTER_API_KEY",
     "HL_API_WALLET_PRIVATE_KEY", "HL_ACCOUNT_ADDRESS",
     "POLY_PRIVATE_KEY", "POLY_FUNDER", "POLY_SIGNATURE_TYPE",
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "LIVE_TRADING_ACK",
@@ -44,12 +44,12 @@ def config_schema() -> Dict[str, Dict[str, Any]]:
         "loop_interval_seconds": {"type": "int", "min": 60, "max": 3600, "label": "Cycle interval (s)", "help": "LLM cost scales with 1/interval"},
         "paper_starting_equity_usd": {"type": "float", "min": 10, "max": 1e7, "label": "Paper starting equity ($)", "help": "applies after a journal reset"},
         # llm
-        "llm.proposer.provider": {"type": "enum", "options": ["gemini", "openai", "anthropic"], "label": "Proposer provider"},
+        "llm.proposer.provider": {"type": "enum", "options": ["gemini", "openai", "anthropic", "openrouter"], "label": "Proposer provider"},
         "llm.proposer.model": {"type": "enum", "options": models, "label": "Proposer model", "help": "called every cycle"},
         "llm.proposer.thinking": {"type": "enum", "options": ["none", "minimal", "low", "medium", "high"], "label": "Proposer thinking", "help": "thought tokens are billed as output; minimal = 0 on 3.6 Flash"},
         "llm.verifier.thinking": {"type": "enum", "options": ["none", "minimal", "low", "medium", "high"], "label": "Verifier thinking"},
         "llm.verifier.enabled": {"type": "bool", "label": "Verifier enabled", "danger": True, "help": "second model must approve every risk-adding trade"},
-        "llm.verifier.provider": {"type": "enum", "options": ["gemini", "openai", "anthropic"], "label": "Verifier provider"},
+        "llm.verifier.provider": {"type": "enum", "options": ["gemini", "openai", "anthropic", "openrouter"], "label": "Verifier provider"},
         "llm.verifier.model": {"type": "enum", "options": models, "label": "Verifier model"},
         "llm.tick_seconds": {"type": "int", "min": 10, "max": 120, "label": "Sensor tick (s)", "help": "price sensor: stops, watch levels, wake triggers"},
         "llm.min_cycle_gap_seconds": {"type": "int", "min": 30, "max": 600, "label": "Min gap between event cycles (s)"},
