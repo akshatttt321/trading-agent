@@ -498,7 +498,8 @@
   function renderLLMTile(s) {
     const tile = $id('st-llm-tile');
     const today = s.tokens_today, total = s.tokens_total;
-    if (!today && !total && !s.llm_model) { tile.hidden = true; return; }
+    const research = s.research_today && s.research_today.usd != null ? s.research_today.usd : null;
+    if (!today && !total && !s.llm_model && research == null) { tile.hidden = true; return; }
     tile.hidden = false;
     const cap = state.config && state.config.llm && state.config.llm.daily_cost_cap_usd;
     const tCost = today && today.cost_usd;
@@ -506,6 +507,7 @@
     el.textContent = fmtCost(tCost);
     el.className = 'stat-value' + (cap && tCost != null && tCost >= cap * 0.8 ? ' stale' : '');
     const bits = [];
+    if (research != null) bits.push('+ ' + fmtCost(research) + ' research');
     if (total && total.cost_usd != null) bits.push('total ' + fmtCost(total.cost_usd));
     if (cap) bits.push('cap ' + fmtCost(cap) + '/day');
     const model = s.llm_model || (state.config && state.config.llm && (state.config.llm.model || (state.config.llm.proposer && state.config.llm.proposer.model)));
@@ -522,6 +524,29 @@
     roles.forEach((r) => tip.push(`${r.name}${r.model ? ' = ' + r.model : ''}: ${r.calls != null ? r.calls + ' calls' : ''}${r.cost != null ? ', ' + fmtCost(r.cost) : ''}`));
     detEl.title = tip.join('\n');
   }
+
+  // -------------------------------------------------------------- render: market brief
+  // status.market_brief {ts, content} — independent research brief refreshed ~6h. The content is
+  // markdown-ish: escape EVERYTHING first, then **x** → <b>x</b> and newlines → <br>. No markdown lib.
+  function briefHTML(md) {
+    return esc(md).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+  }
+  function renderMarketBrief() {
+    const b = state.status && state.status.market_brief;
+    const panel = $id('brief-panel');
+    if (!b || !b.content) { panel.hidden = true; return; }
+    panel.hidden = false;
+    $id('brief-age').textContent = b.ts ? fmtAge(Date.now() / 1000 - b.ts) + ' ago' : '';
+    const body = $id('brief-body');
+    const key = (b.ts || 0) + '|' + b.content;
+    if (state.briefKey !== key) { state.briefKey = key; body.innerHTML = briefHTML(b.content); }
+    body.classList.toggle('collapsed', !state.briefOpen);
+    const btn = $id('brief-toggle');
+    // Offer the toggle only when the collapsed clamp actually hides something.
+    btn.hidden = !state.briefOpen && body.scrollHeight <= body.clientHeight + 2;
+    btn.textContent = state.briefOpen ? 'show less' : 'show more';
+  }
+  $id('brief-toggle').addEventListener('click', () => { state.briefOpen = !state.briefOpen; renderMarketBrief(); });
 
   // -------------------------------------------------------------- render: chart
   function ensureChart() {
@@ -751,6 +776,20 @@
     strip.innerHTML = watches.length ? `<span class="watch-label">watching</span>` + watches.map((w) => {
       const below = String(w.direction).toLowerCase() === 'below';
       return `<span class="watch-pill" title="${esc(w.note || '')}">👁 ${esc(w.coin)} <span class="watch-dir">${below ? '▼' : '▲'}</span> ${fmtPx(w.px)}</span>`;
+    }).join('') : '';
+
+    // "resting limits" strip — limit orders waiting for price to touch (status.resting_orders)
+    const resting = Array.isArray(state.status && state.status.resting_orders) ? state.status.resting_orders : [];
+    const rstrip = $id('resting-strip');
+    rstrip.hidden = !resting.length;
+    rstrip.innerHTML = resting.length ? `<span class="watch-label">resting limits</span>` + resting.map((o) => {
+      const side = String(o.side || '').toLowerCase();
+      const tip = [
+        o.stop_loss_px != null ? 'stop ' + fmtPx(o.stop_loss_px) : 'no stop',
+        o.take_profit_px != null ? 'tp ' + fmtPx(o.take_profit_px) : 'no take-profit',
+        o.ts ? 'resting ' + fmtAge(Date.now() / 1000 - o.ts) : '',
+      ].filter(Boolean).join(' · ');
+      return `<span class="watch-pill" title="${esc(tip)}">⏳ ${esc(o.coin)} ${esc(side)} ${fmtUSD(o.size_usd)} @ ${fmtPx(o.limit_price)}</span>`;
     }).join('') : '';
   }
 
@@ -1326,6 +1365,27 @@
     }).join('') : emptyRow(4, NO_TRADES);
   }
 
+  // Exit quality: stop-out counterfactuals from status.exit_quality — for each stop-out, the max
+  // favorable excursion in the 4h AFTER the exit and whether the original TP would still have hit.
+  function renderExitQuality() {
+    const rows = Array.isArray(state.status && state.status.exit_quality) ? state.status.exit_quality : [];
+    const block = $id('exit-quality-block');
+    block.hidden = !rows.length;
+    if (!rows.length) return;
+    $id('xq-count').textContent = `(${rows.length})`;
+    $id('xq-table').querySelector('tbody').innerHTML = rows.map((r) => {
+      const side = String(r.side || '').toLowerCase();
+      const tp = r.tp_hit === true ? '<span class="pos">✓</span>' : r.tp_hit === false ? '<span class="neg">✗</span>' : '<span class="muted">—</span>';
+      return `<tr>
+        <td class="coin" data-l="Coin">${esc(r.coin)}</td>
+        <td data-l="Side">${side ? `<span class="side-pill ${esc(side)}">${esc(side.toUpperCase())}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="muted small nowrap" data-l="When" title="${esc(fmtTime(r.exit_ts))} · ${esc(fmtAge(Date.now() / 1000 - n0(r.exit_ts)))} ago">${r.exit_ts ? esc(fmtClock(r.exit_ts)) : '—'}</td>
+        <td class="r ${signClass(r.mfe_pct)}" data-l="MFE after exit" title="max favorable move in the 4h after the exit — positive = the trade kept going the right way">${fmtPct(r.mfe_pct, 1)}</td>
+        <td class="r" data-l="TP would have hit">${tp}</td>
+      </tr>`;
+    }).join('');
+  }
+
   function chartColors() {
     const css = getComputedStyle(document.documentElement);
     const g = (k, d) => css.getPropertyValue(k).trim() || d;
@@ -1537,10 +1597,12 @@
   function renderAll() {
     renderChrome();
     renderStatus();
+    renderMarketBrief();
     renderChart();
     renderPositions();
     renderFeed();
     renderPerformance();
+    renderExitQuality();
     renderLearner();
     renderLearnerExtras();
     renderConfig();

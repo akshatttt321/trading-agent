@@ -122,6 +122,19 @@
     </div>
   </section>
 
+  <!-- Panel 2b: market brief (status.market_brief — independent research refreshed ~6h) -->
+  <section class="panel brief-panel" id="brief-panel" hidden>
+    <div class="panel-head">
+      <h2>Market brief</h2>
+      <div class="panel-tools">
+        <span id="brief-age" class="muted small"></span>
+        <span class="via-tag">via You.com</span>
+      </div>
+    </div>
+    <div id="brief-body" class="brief-body collapsed"></div>
+    <button id="brief-toggle" class="brief-toggle" type="button" hidden>show more</button>
+  </section>
+
   <!-- Panel 3: positions -->
   <section class="panel positions-panel">
     <div class="panel-head">
@@ -129,6 +142,7 @@
       <span id="pos-summary" class="muted small"></span>
     </div>
     <div id="watch-strip" class="watch-strip" hidden></div>
+    <div id="resting-strip" class="watch-strip" hidden></div>
     <div id="pos-empty" class="empty-state" hidden>
       <div class="empty-title">No positions open</div>
       <div class="empty-sub">The agent is waiting for a setup that clears its risk-reward bar.</div>
@@ -258,6 +272,19 @@
             </table>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Exit quality: stop-out counterfactuals from status.exit_quality (outside #perf-body — it
+         renders from /api/status and must show even before /api/analytics has data). -->
+    <div id="exit-quality-block" hidden>
+      <h3 class="sub-head">Exit quality <span class="count" id="xq-count"></span></h3>
+      <div class="muted small xq-caption">what happened in the 4h after each stop-out — high MFE = the stop cut a trade that was still working</div>
+      <div class="table-wrap">
+        <table class="tbl num-tbl mini cards" id="xq-table">
+          <thead><tr><th>Coin</th><th>Side</th><th>When</th><th class="r">MFE after exit</th><th class="r">TP would have hit</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
   </section>

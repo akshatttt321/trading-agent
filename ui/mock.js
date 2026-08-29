@@ -432,6 +432,32 @@
         { coin: 'SOL', direction: 'below', px: 165.4, note: 'Stop loss level for SOL long', ts: round(t - 6300, 1) },
         { coin: 'XRP', direction: 'above', px: 0.66, note: 'Take-profit zone for the XRP swing', ts: round(t - 11800, 1) },
       ],
+      // Independent market-research brief (You.com API, refreshed ~6h). Markdown-ish text.
+      market_brief: {
+        ts: round(t - 7600, 1),
+        content: 'BTC holding the **78.4k–79.6k** range; a clean break of **79.6k** opens **82k**, where the largest liquidation cluster of the week sits.\n' +
+          '- Support: **76.8k** (weekly open) then **74.2k**; heavy resting bids reported near **77k**.\n' +
+          '- ETH lagging: **2,410** resistance rejected twice; funding mildly positive (**+0.008%/8h**) — no squeeze fuel yet.\n' +
+          '- SOL perp OI at a 30-day high with funding **+0.021%/8h** — crowded longs; **158** is the level that matters.\n' +
+          '- Macro: FOMC minutes Wed 18:00 UTC and Friday CPI are the vol events this week; expect thin books into both.\n' +
+          '- Liquidations last 24h: **$210M** (60% shorts), largest single wipe on BTC at **79.1k**.',
+      },
+      // Stop-out counterfactuals: MFE in the 4h after each exit + whether the original TP would have hit.
+      exit_quality: [
+        { coin: 'SOL', side: 'long', exit_ts: round(t - 5400, 1), mfe_pct: 3.8, tp_hit: true },
+        { coin: 'ETH', side: 'short', exit_ts: round(t - 14200, 1), mfe_pct: 1.2, tp_hit: false },
+        { coin: 'DOGE', side: 'long', exit_ts: round(t - 26400, 1), mfe_pct: -0.6, tp_hit: false },
+        { coin: 'BTC', side: 'short', exit_ts: round(t - 41000, 1), mfe_pct: 0.3, tp_hit: null },
+        { coin: 'SUI', side: 'long', exit_ts: round(t - 55600, 1), mfe_pct: 5.1, tp_hit: true },
+        { coin: 'AVAX', side: 'short', exit_ts: round(t - 69800, 1), mfe_pct: -1.4, tp_hit: false },
+      ],
+      // Limit orders resting on the book, waiting for price to touch.
+      resting_orders: killed ? [] : [
+        { coin: 'SUI', side: 'short', size_usd: 25, limit_price: 0.725, stop_loss_px: 0.762, take_profit_px: 0.648, ts: round(t - 3300, 1) },
+        { coin: 'LINK', side: 'long', size_usd: 40, limit_price: 13.62, stop_loss_px: 13.05, take_profit_px: 15.1, ts: round(t - 9800, 1) },
+      ],
+      // Today's prediction-market research spend (You.com calls).
+      research_today: { day: new Date(t * 1000).toISOString().slice(0, 10), usd: 0.012 },
       snapshot: snap,
     };
   }

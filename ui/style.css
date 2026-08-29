@@ -922,3 +922,15 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 /* manager badge — the cheap position-manager model reviewed open positions this cycle (decision.managed) */
 .managed-badge { font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 999px; background: rgba(45,190,190,0.13); color: #3fc6c6; border: 1px solid rgba(45,190,190,0.3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 :root[data-theme="light"] .managed-badge { color: #0c7d7d; background: rgba(14,138,138,0.1); border-color: rgba(14,138,138,0.35); }
+
+/* ---- market brief panel (status.market_brief — You.com research) ---- */
+.via-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+.brief-body { font-size: 13px; line-height: 1.55; color: var(--text-2); overflow-wrap: break-word; }
+.brief-body b { color: var(--text); font-weight: 600; }
+.brief-body.collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.brief-toggle { margin-top: 6px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 12px; color: var(--accent-text); cursor: pointer; }
+.brief-toggle:hover { text-decoration: underline; }
+.brief-toggle[hidden] { display: none; }
+
+/* ---- exit quality mini-table (status.exit_quality — stop-out counterfactuals) ---- */
+.xq-caption { margin: -2px 0 8px; }
