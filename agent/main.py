@@ -270,6 +270,26 @@ class Agent:
             log.info(f"[dim]throttle: sizing x{m:.2f} (loss streak {st.get('losses',0)}, prev day {self.state.get('prev_day_pnl')})[/]")
         return m
 
+    def _market_brief(self):
+        """Twice-daily independent market research (You.com finance_research) for the entry prompt: support/resistance,
+        liquidation clusters, funding extremes, macro calendar. Silently absent without YDC_API_KEY."""
+        from . import ydc
+        if not ydc.key():
+            return None
+        b = self.state.get("market_brief") or {}
+        if (time.time() - (b.get("ts") or 0)) / 3600 >= self.cfg.llm.ydc_brief_interval_h:
+            content = ydc.finance_research(
+                "Crypto market brief for a perp trader, max 200 words, bullets, numbers over prose: BTC and ETH key "
+                "support/resistance this week with liquidation clusters if reported, funding-rate extremes across major "
+                "perps, and macro events in the next 72h that could move crypto.", "standard", timeout=75)
+            if content:
+                b = {"ts": time.time(), "content": content[:1500]}
+                self.state.set("market_brief", b)
+                log.info("[dim]ydc market brief refreshed[/]")
+        if b.get("content") and (time.time() - b["ts"]) / 3600 < 24:
+            return {"age_h": round((time.time() - b["ts"]) / 3600, 1), "content": b["content"]}
+        return None
+
     def _pm_due(self, snap: AccountSnapshot, prices: Dict[str, float]) -> bool:
         """Prediction markets run on their OWN cadence, separate from perps: every pm_interval_min, or sooner if a held
         token moved >= pm_move_trigger_pct, or a held PM position has no stop/target yet."""
@@ -777,6 +797,10 @@ class Agent:
         h_utc = time.gmtime().tm_hour
         sess = "asia" if h_utc < 7 else "europe" if h_utc < 13 else "us" if h_utc < 21 else "late"
         market_prompt["session"] = {"utc_hour": h_utc, "session": sess}
+        if not pm_scope:
+            brief = self._market_brief()
+            if brief:
+                market_prompt["analyst_brief"] = brief
         self._mark_shown(shown, prices, market)
         if pm_due:
             self.state.set("last_pm_ts", time.time())

@@ -183,6 +183,9 @@ HOW TO DECIDE
     via the stop or take-profit. If momentum reverses, the thesis breaks, or you simply want to bank a gain now, propose
     the close this cycle. Do not cling to a position just because its stop has not been hit. A loss-realising close is
     reviewed by the verifier; a profitable close executes immediately.
+  - analyst_brief (when present): independent web research refreshed ~2x/day - support/resistance, liquidation
+    clusters, funding extremes, macro calendar. Cross-check your levels against it; it can be hours old (age_h),
+    live prices always win over it.
   - LIMIT ENTRIES - the decision rule: because you are event-driven, EVERY look happens while something is moving,
     so "the move is happening now" is not a reason for a market order. Choose by PRICE LOCATION, not excitement:
     fresh break of a level this 15m candle, price still near the trigger -> market. Trend-aligned but 15m-stretched

@@ -78,7 +78,20 @@ class Researcher:
             return None
         self.last_cost = 0.0
         client = self._gemini()
-        q = (f"Double-check with the latest web sources. Market: \"{market.get('question')}\" (resolves {market.get('ends')}). "
+        # independent second source (You.com /v1/answer, ~4s): evidence from a DIFFERENT index than the grounded
+        # Gemini search below - "confirmed by a second search" then actually means two independent sources.
+        ydc_block = ""
+        try:
+            from . import ydc
+            if ydc.key():
+                ya = ydc.answer(f"{market.get('question')} - what is the actual current evidence? Cite primary sources "
+                                f"with dates. Do NOT use prediction-market odds as evidence.")
+                if ya and ya.get("answer"):
+                    cites = "; ".join((c.get("source") or "")[:60] for c in (ya.get("citations") or [])[:3])
+                    ydc_block = f"\n\nINDEPENDENT SOURCE (You.com): {ya['answer'][:600]} [sources: {cites}]\n"
+        except Exception as e:
+            log.warning(f"ydc verify evidence: {e}")
+        q = (f"Double-check with the latest web sources.{ydc_block} Market: \"{market.get('question')}\" (resolves {market.get('ends')}). "
              f"Someone estimates the '{outcome}' outcome wins with probability {claimed_prob:.0%}, but the market prices it far lower. "
              f"Verify: the exact event and date, and which side '{outcome}' actually refers to. Then give YOUR independent probability. "
              "Reply ONLY JSON: {{\"prob_yes\": 0..1, \"confidence\": 0..1, \"verified_outcome\": true/false (did you confirm which side "

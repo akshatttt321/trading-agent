@@ -48,7 +48,8 @@ class LLMCfg(BaseModel):
     # --- position-manager brain (2nd agent): cheap model that reviews OPEN positions on its own fast cadence ---
     manager_enabled: bool = True
     manager: ModelRef = Field(default_factory=lambda: ModelRef(provider="gemini", model="gemini-3.5-flash-lite", thinking="minimal"))
-    manager_interval_min: int = 20           # max minutes between manager looks (its event triggers wake it sooner)
+    manager_interval_min: int = 15           # max minutes between manager looks (its event triggers wake it sooner)
+    ydc_brief_interval_h: int = 12           # refresh the You.com market brief this often (needs YDC_API_KEY)
     manager_min_move_atr15: float = 0.5      # wake early: held coin moved this x its 15m ATR since last look
     manager_move_floor_pct: Dict[str, float] = Field(default_factory=lambda: {"majors": 0.35, "midcaps": 0.5, "movers": 1.0})
     manager_move_gap_min: int = 4            # move-triggered manager looks at most this often (interval/near-level unaffected)
