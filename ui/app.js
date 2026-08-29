@@ -49,6 +49,7 @@
     feedKind: 'all',          // decision-feed sub-chip: all | new | updates | rejected | holds | quiet | errors
     shadowBy: 'all',          // rejecter chip on the shadow-trades table: all | verifier | risk_gate | rr_model
     feedOpen: new Set(),      // cycle ids the user expanded (survive re-render)
+    feedQuietOpen: new Set(), // 'All' view: collapsed quiet-run rows the user expanded, keyed by the run's newest cycle id (survive re-render)
   };
 
   // -------------------------------------------------------------- formatting
@@ -1002,7 +1003,14 @@
       feed.innerHTML = feedEmptyHTML();
       return;
     }
-    feed.innerHTML = cycles.map((c) => {
+    // Only the 'All' sub-chip collapses runs of consecutive quiet cycles; dedicated views render every card.
+    feed.innerHTML = state.feedKind === 'all'
+      ? renderAllFeedHTML(cycles, pred)
+      : cycles.map((c) => cycleCardHTML(c, pred)).join('');
+  }
+
+  // One cycle card (<details>) — extracted from renderFeed so the 'All' view's expanded quiet runs reuse it.
+  function cycleCardHTML(c, pred) {
       const d = c.decision || {};
       const actions = Array.isArray(d.actions) ? d.actions : [];
       const orders = Array.isArray(c.orders) ? c.orders : [];
@@ -1061,7 +1069,41 @@
           <div class="actions">${rows.join('')}</div>
         </div>
       </details>`;
-    }).join('');
+  }
+
+  // ---- 'All' view only: collapse each run of 2+ consecutive quiet cycles into one compact expandable row ----
+  // Quiet = skipped by the attention gate with no order rows to render (single quiet cycles render normally).
+  function isCollapsibleQuiet(c, pred) {
+    if (!isQuiet(c)) return false;
+    const orders = Array.isArray(c.orders) ? c.orders : [];
+    return !(pred ? orders.some(pred) : orders.length > 0);
+  }
+  function renderAllFeedHTML(cycles, pred) {
+    const out = [];
+    let i = 0;
+    while (i < cycles.length) {
+      if (!isCollapsibleQuiet(cycles[i], pred)) { out.push(cycleCardHTML(cycles[i], pred)); i += 1; continue; }
+      let j = i + 1;
+      while (j < cycles.length && isCollapsibleQuiet(cycles[j], pred)) j += 1;
+      const run = cycles.slice(i, j);
+      out.push(run.length >= 2 ? quietRunHTML(run, pred) : cycleCardHTML(run[0], pred));
+      i = j;
+    }
+    return out.join('');
+  }
+  function quietRunHTML(run, pred) {
+    // The feed is newest-first: run[0] is the newest cycle, run[run.length - 1] the oldest.
+    const key = String(run[0].id);
+    const open = state.feedQuietOpen.has(key);
+    const from = fmtClock(run[run.length - 1].ts), to = fmtClock(run[0].ts);
+    const managed = run.filter((c) => c.decision && c.decision.managed && typeof c.decision.managed === 'object').length;
+    const label = `${run.length} quiet cycles · ${from}–${to}` + (managed ? ` · ${managed} manager review${managed === 1 ? '' : 's'}` : '');
+    return `<div class="quiet-run${open ? ' open' : ''}">
+      <button type="button" class="quiet-run-row muted small" data-run="${esc(key)}" aria-expanded="${open ? 'true' : 'false'}" title="${open ? 'Collapse' : 'Expand'} ${run.length} consecutive quiet cycles">
+        <span class="qr-chev" aria-hidden="true">${open ? '▾' : '▸'}</span><span>${esc(label)}</span>
+      </button>
+      ${open ? run.map((c) => cycleCardHTML(c, pred)).join('') : ''}
+    </div>`;
   }
   // Remember which cycles the user expanded so polling re-renders don't collapse them ('toggle' does not bubble: use capture).
   $id('feed').addEventListener('toggle', (e) => {
@@ -1069,6 +1111,14 @@
     if (!(d instanceof HTMLDetailsElement)) return;
     if (d.open) state.feedOpen.add(d.dataset.id); else state.feedOpen.delete(d.dataset.id);
   }, true);
+  // 'All' view: expand/collapse a compact quiet-run row in place (state survives the 60s poll re-render).
+  $id('feed').addEventListener('click', (e) => {
+    const b = e.target.closest('.quiet-run-row');
+    if (!b) return;
+    const key = b.dataset.run;
+    if (state.feedQuietOpen.has(key)) state.feedQuietOpen.delete(key); else state.feedQuietOpen.add(key);
+    renderFeed();
+  });
   $id('shadow-filters').addEventListener('click', (e) => {
     const b = e.target.closest('.fchip');
     if (!b) return;

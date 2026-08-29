@@ -315,7 +315,8 @@
   // ~27% quiet (matches analytics.activity.quiet_skipped), ~35% holds, the rest a mix of new entries
   // (fill=open_perp, pm, spotbuy) and position updates (stop=update_stop, pmupd, close, spotsell) plus
   // rejections / failures — so both the New and Updates chips populate in demo mode.
-  const SCENARIOS = ['hold', 'quiet', 'fill', 'quiet', 'reject', 'stop', 'quiet', 'pm', 'hold', 'close', 'quiet', 'fail', 'pmupd', 'hold', 'pmreject', 'quiet', 'spotbuy', 'reject', 'fill', 'quiet', 'stop', 'hold', 'pm', 'quiet', 'spotsell', 'close', 'pmreject', 'hold', 'quiet', 'fill', 'llmerr', 'hold', 'quiet', 'pmupd'];
+  // The three back-to-back 'quiet's at the start guarantee the 'All' view's collapsed quiet-run row is visible in demo mode.
+  const SCENARIOS = ['hold', 'quiet', 'quiet', 'quiet', 'fill', 'reject', 'stop', 'pm', 'hold', 'close', 'quiet', 'fail', 'pmupd', 'hold', 'pmreject', 'quiet', 'spotbuy', 'reject', 'fill', 'quiet', 'stop', 'hold', 'pm', 'quiet', 'spotsell', 'close', 'pmreject', 'hold', 'quiet', 'fill', 'llmerr', 'hold', 'quiet', 'pmupd'];
   const cycles = [];
   // Keep a deep enough pool (~240 cycles) that every kind filter can fill its 30 rows in demo mode.
   const CYCLE_POOL = 240;
