@@ -375,7 +375,8 @@ class Brain:
         e = err.lower()
         # rate limit OR transient overload -> worth trying the next model in the chain
         return any(k in e for k in ("429", "resource_exhausted", "rate limit", "quota", "503", "unavailable",
-                                    "high demand", "overloaded", "504", "deadline", "timeout", "500", "internal"))
+                                    "high demand", "overloaded", "504", "deadline", "timeout", "500", "internal",
+                                    "402", "payment", "credits", "insufficient", "401", "unauthorized"))
 
     def _call(self, provider, system: str, msg: str, schema: Dict, name: str):
         """Call a provider; on 429/503 walk down the fallback chain (each model has its own quota)."""
