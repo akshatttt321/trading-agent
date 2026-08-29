@@ -187,6 +187,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 }
 .panel:hover { border-color: var(--border-strong); }
 .status-panel   { grid-column: 1 / -1; }
+.brief-panel    { grid-column: 1 / -1; }
 .chart-panel    { grid-column: span 7; }
 .positions-panel{ grid-column: span 5; }
 .perf-panel     { grid-column: 1 / -1; }
@@ -925,8 +926,12 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 
 /* ---- market brief panel (status.market_brief — You.com research) ---- */
 .via-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
-.brief-body { font-size: 13px; line-height: 1.55; color: var(--text-2); overflow-wrap: break-word; }
+.brief-body { font-size: 13px; line-height: 1.55; color: var(--text-2); overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 .brief-body b { color: var(--text); font-weight: 600; }
+.brief-body .brief-p { margin: 0 0 4px; }
+.brief-body .brief-list { margin: 0; padding-left: 18px; list-style: disc; }
+.brief-body .brief-list li { margin: 0 0 4px; }
+.brief-body > :last-child, .brief-body .brief-list li:last-child { margin-bottom: 0; }
 .brief-body.collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 .brief-toggle { margin-top: 6px; padding: 0; background: transparent; border: 0; font: inherit; font-size: 12px; color: var(--accent-text); cursor: pointer; }
 .brief-toggle:hover { text-decoration: underline; }

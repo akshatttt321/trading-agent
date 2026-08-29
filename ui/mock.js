@@ -435,12 +435,13 @@
       // Independent market-research brief (You.com API, refreshed ~6h). Markdown-ish text.
       market_brief: {
         ts: round(t - 7600, 1),
-        content: 'BTC holding the **78.4k–79.6k** range; a clean break of **79.6k** opens **82k**, where the largest liquidation cluster of the week sits.\n' +
-          '- Support: **76.8k** (weekly open) then **74.2k**; heavy resting bids reported near **77k**.\n' +
-          '- ETH lagging: **2,410** resistance rejected twice; funding mildly positive (**+0.008%/8h**) — no squeeze fuel yet.\n' +
-          '- SOL perp OI at a 30-day high with funding **+0.021%/8h** — crowded longs; **158** is the level that matters.\n' +
-          '- Macro: FOMC minutes Wed 18:00 UTC and Friday CPI are the vol events this week; expect thin books into both.\n' +
-          '- Liquidations last 24h: **$210M** (60% shorts), largest single wipe on BTC at **79.1k**.',
+        content: '- **BTC — $78,089:** support **$77.4k–$78.0k**; resistance **$78.3k**, then **$80k–$81.5k** and **$83k**. [[1, 2]]\n' +
+          '- **BTC liquidation zones:** reported long-liquidation interest around **$77k–$78k**, with a larger downside cluster near **$75k**; **$82.7M** liquidated over 24h, **~87.6% longs**. [[2]]\n' +
+          '- **ETH — $2,449.89:** near-term support **$2,429–$2,440**; resistance **$2,458**, then **$2,471**, **$2,503–$2,528**. [[3, 4]]\n' +
+          '- **ETH liquidations:** approximately **$90.65M** in 24h futures liquidations; no reliable price-cluster levels were reported in the retrieved feed. [[5]]\n' +
+          '- **Funding:** BTC **+0.0086%/4h**, approximately **18.8% annualized**; positive in **42/42** periods but below the cited **+0.03%/4h** crowding threshold—bullish carry, not an extreme. [[2]]\n' +
+          '- **ETH/SOL/XRP/BNB/DOGE:** no comparable live numeric extremes were reliably reported; avoid treating headline "positive funding" as a trade signal. [[6, 7]]\n' +
+          '- **Next 72h:** weekend liquidity first; monitor **U.S. ISM Manufacturing PMI / construction-spending calendar entries for Sep. 1** and any Fed communication, with hawkish repricing the principal downside catalyst. [[8, 9, 10]]',
       },
       // Stop-out counterfactuals: MFE in the 4h after each exit + whether the original TP would have hit.
       exit_quality: [

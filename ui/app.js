@@ -527,9 +527,28 @@
 
   // -------------------------------------------------------------- render: market brief
   // status.market_brief {ts, content} — independent research brief refreshed ~6h. The content is
-  // markdown-ish: escape EVERYTHING first, then **x** → <b>x</b> and newlines → <br>. No markdown lib.
+  // markdown-ish. Per line: escape EVERYTHING first, then strip [[n]] / [[n, m]] citation markers,
+  // **x** → <b>x</b> (non-greedy, multiple pairs per line). "- " lines become a compact <ul>;
+  // anything else becomes a paragraph. No markdown lib.
   function briefHTML(md) {
-    return esc(md).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+    const inline = (s) => esc(s)
+      .replace(/\s*\[\[[\d\s,]+\]\]/g, '')            // [[1]] / [[1, 2]] citation markers → gone
+      .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    let html = '';
+    let items = [];
+    const flush = () => {
+      if (!items.length) return;
+      html += '<ul class="brief-list">' + items.map((s) => '<li>' + s + '</li>').join('') + '</ul>';
+      items = [];
+    };
+    for (const line of String(md == null ? '' : md).split('\n')) {
+      const m = /^\s*[-*•]\s+(\S.*)/.exec(line);
+      if (m) { items.push(inline(m[1])); continue; }
+      flush();
+      if (line.trim()) html += '<p class="brief-p">' + inline(line.trim()) + '</p>';
+    }
+    flush();
+    return html;
   }
   function renderMarketBrief() {
     const b = state.status && state.status.market_brief;
