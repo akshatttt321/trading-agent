@@ -634,8 +634,6 @@ class Agent:
         # volatility-scaled maximum quiet interval, stretched by the hold streak (model kept saying HOLD -> ask less)
         atr = (perps.get("BTC") or {}).get("atr14_1h_pct") or l.vol_low_atr_pct
         v = min(max((atr - l.vol_low_atr_pct) / max(l.vol_high_atr_pct - l.vol_low_atr_pct, 1e-9), 0.0), 1.0)
-        if self._pm_due(snap, prices):
-            return ""                                 # prediction-market cadence forces a look (own timer)
         streak = int(self.state.get("hold_streak") or 0)
         mult = min(1.0 + l.hold_streak_step * streak, l.hold_streak_max_mult)
         h_now = time.gmtime().tm_hour
@@ -737,6 +735,15 @@ class Agent:
         quiet_reason = self._quiet_reason(snap, prices, market)
         if not quiet_reason and not shown:
             quiet_reason = "no coin due in any bucket"
+        pm_scope = False
+        if quiet_reason and pm_due:
+            # PM-SCOPED look: perps are quiet but the prediction-market cadence / move-trigger is due. Pay for a
+            # stripped prompt (PM data only - no perp market data), not a full entry look. Tagged for the journal/UI.
+            pm_scope = True
+            shown = {}
+            self._wake = (self._wake + " | " if self._wake else "") + "pm cadence"
+            log.info(f"[dim]pm-scoped look (perps quiet: {quiet_reason[:60]})[/]")
+            quiet_reason = ""
         if not quiet_reason and pm_due:
             self.researcher.annotate(market.get("prediction_markets", []))   # research only when we will actually ask the model
         if quiet_reason:
@@ -757,14 +764,16 @@ class Agent:
         market_prompt = dict(market)
         market_prompt["perps"] = {c: {**market["perps"][c], "bucket": b.replace("+waking", ""), **({"waking_up": True} if b.endswith("+waking") or (market["perps"][c].get("vol_expansion") or 0) >= self.cfg.llm.wakeup_expansion else {})}
                                   for c, b in shown.items() if c in market.get("perps", {})}
-        market_prompt["not_shown"] = f"{len(market.get('perps', {})) - len(shown)} other coins not due this cycle"
+        market_prompt["not_shown"] = ("perps quiet - prediction-market review only" if pm_scope else
+                                      f"{len(market.get('perps', {})) - len(shown)} other coins not due this cycle")
         perps_all = market.get("perps", {})
         ups = [c for c, v in perps_all.items() if v.get("ema20_above_ema50") is True and v.get("above_sma50_1h")]
         downs = [c for c, v in perps_all.items() if v.get("ema20_above_ema50") is False and not v.get("above_sma50_1h")]
         downs.sort(key=lambda c: (perps_all[c].get("chg_24h_pct") or 0))
         ups.sort(key=lambda c: -(perps_all[c].get("chg_24h_pct") or 0))
-        market_prompt["direction"] = {"uptrends": len(ups), "downtrends": len(downs), "mixed": len(perps_all) - len(ups) - len(downs),
-                                      "strongest_up": ups[:3], "strongest_down": downs[:3]}
+        if not pm_scope:
+            market_prompt["direction"] = {"uptrends": len(ups), "downtrends": len(downs), "mixed": len(perps_all) - len(ups) - len(downs),
+                                          "strongest_up": ups[:3], "strongest_down": downs[:3]}
         h_utc = time.gmtime().tm_hour
         sess = "asia" if h_utc < 7 else "europe" if h_utc < 13 else "us" if h_utc < 21 else "late"
         market_prompt["session"] = {"utc_hour": h_utc, "session": sess}
@@ -783,8 +792,8 @@ class Agent:
             self.state.finish_cycle(cycle_id, "", {"wake": self._wake} | ({"managed": self._managed} if self._managed else {}), error=str(e))
             return
 
-        if decision.market_view != "(proposer failed)":
-            _mark_llm_baselines()                    # reset the attention clock only when the model actually answered
+        if decision.market_view != "(proposer failed)" and not pm_scope:
+            _mark_llm_baselines()                    # reset the attention clock only when the model actually answered (perp looks only)
         log.info(f"[bold]view:[/] {decision.market_view}")
         if decision.watch_levels:
             self.state.set("watch_levels", self._useful_watch_levels(decision.watch_levels, snap, time.time()))
@@ -914,7 +923,8 @@ class Agent:
             _execute(rrv.action, f"{reason} | rr: {rrv.reason}", rrv.risk_usd)
 
         self._account_tokens()
-        self.state.set("hold_streak", 0 if proposed_any else int(self.state.get("hold_streak") or 0) + 1)
+        if not pm_scope:                                      # a PM review says nothing about perp-market quietness
+            self.state.set("hold_streak", 0 if proposed_any else int(self.state.get("hold_streak") or 0) + 1)
 
         self.state.finish_cycle(cycle_id, raw, decision.model_dump() | {"wake": self._wake} | ({"managed": self._managed} if self._managed else {}))
         snap = self.snapshot(prices)
