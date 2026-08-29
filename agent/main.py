@@ -723,6 +723,14 @@ class Agent:
         # -------- 2nd brain: position manager (cheap, fast cadence, runs even on quiet cycles) --------
         if self._manage_positions(snap, prices, market, cycle_id, cycle_start_ts, funding, regime):
             snap = self.snapshot(prices)                     # manager closed/changed something
+        if self._wake.startswith("manager:"):
+            # WAKE-SCOPED cycle: a position trigger woke the cheap brain ONLY. The entry brain gets its chance on
+            # its own wake classes (heartbeat/forced timer, entry moves, watch levels) - otherwise every manager
+            # wake hands the quiet gate a fresh roll of the dice and paid entry looks leak on quiet days.
+            self.state.finish_cycle(cycle_id, "", {"skipped": "manage-only cycle (position trigger)", "actions": [],
+                                                   "wake": self._wake} | ({"managed": self._managed} if self._managed else {}))
+            console.rule(f"[dim]equity ${snap.equity_usd:,.2f}  positions={snap.open_position_count}  (manage-only)")
+            return
 
         # ---- bucket scheduling + quiet gate: don't pay for an LLM call when there is nothing to decide ------
         shown = self._select_shown(snap, prices, market)
