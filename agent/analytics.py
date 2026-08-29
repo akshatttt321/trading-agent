@@ -97,7 +97,7 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
     cyc = c.execute("SELECT decision, error FROM cycles").fetchall()
     skipped = sum(1 for r in cyc if (_j(r["decision"], {}) or {}).get("skipped"))
     failed = sum(1 for r in cyc if r["error"] or (_j(r["decision"], {}) or {}).get("market_view") == "(proposer failed)")
-    orders = c.execute("SELECT approved, risk_reason, action FROM orders").fetchall()
+    orders = c.execute("SELECT approved, risk_reason, action, result FROM orders").fetchall()
     proposed = sum(1 for o in orders if (_j(o["action"], {}) or {}).get("kind") in ("open_perp", "spot_buy", "pm_buy"))
     rejected = [o for o in orders if not o["approved"]]
     rej_by = {"verifier": 0, "risk_gate": 0, "rr_model": 0, "other": 0}
@@ -141,7 +141,8 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
             "recent": list(reversed(trades[-20:])),
         },
         "activity": {"cycles": len(cyc), "quiet_skipped": skipped, "proposer_failures": failed, "trade_proposals": proposed,
-                     "rejected": len(rejected), "rejected_by": rej_by, "approved_orders": len([1 for o in orders if o["approved"]])},
+                     "rejected": len(rejected), "rejected_by": rej_by, "approved_orders": len([1 for o in orders if o["approved"]]),
+                     "fills": sum(1 for o in orders if o["approved"] and (_j(o["result"], {}) or {}).get("ok") and not (_j(o["result"], {}) or {}).get("resting"))},
         "cost": {"llm_usd_total": round(llm_cost, 4), "llm_usd_per_day": round(llm_cost / days, 4),
                  "pnl_per_llm_usd": round((now_eq - start_eq) / llm_cost, 2) if llm_cost else None,
                  "pnl_per_day": round((now_eq - start_eq) / days, 4),

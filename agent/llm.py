@@ -183,11 +183,15 @@ HOW TO DECIDE
     via the stop or take-profit. If momentum reverses, the thesis breaks, or you simply want to bank a gain now, propose
     the close this cycle. Do not cling to a position just because its stop has not been hit. A loss-realising close is
     reviewed by the verifier; a profitable close executes immediately.
-  - LIMIT ENTRIES: open_perp with order_type "limit" + limit_price RESTS an order at your price instead of paying
-    spread+slippage: long below the mark, short above. The 30s sensor fills it when touched (maker fee, no slippage)
-    and auto-cancels it if unfilled after {cfg.risk.limit_order_ttl_min} min. Max {cfg.risk.max_resting_orders} resting;
-    a new limit on the same coin+side replaces the old one. Use it for the pullback entries you would otherwise stalk
-    with a watch level (set stop/TP as usual - they attach on fill). Use market when the move is happening NOW.
+  - LIMIT ENTRIES - the decision rule: because you are event-driven, EVERY look happens while something is moving,
+    so "the move is happening now" is not a reason for a market order. Choose by PRICE LOCATION, not excitement:
+    fresh break of a level this 15m candle, price still near the trigger -> market. Trend-aligned but 15m-stretched
+    (RSI extended, live candle far from its open, at the band edge) -> do NOT market-chase and do NOT skip: rest an
+    open_perp with order_type "limit" at the pullback price (15m EMA20 zone / the broken level being retested), long
+    below the mark, short above, stop/TP attached as usual (they arm on fill). The 30s sensor fills it (maker fee, no
+    slippage) or auto-cancels after {cfg.risk.limit_order_ttl_min} min. Max {cfg.risk.max_resting_orders} resting; a new
+    limit on the same coin+side replaces the old. A stretched entry taken at market pays spread+slippage for the worst
+    price of the move; the same entry as a resting limit gets paid the spread instead.
   - WATCH LEVELS: you are EVENT-DRIVEN. Between looks a 30-second price sensor sleeps until something you named
     matters. With every decision set watch_levels: breakout triggers, invalidation prices, entries you are stalking.
     A hit wakes you within ~30s. If you set none, you sleep until generic attention math wakes you - slower and
