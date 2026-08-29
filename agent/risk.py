@@ -111,16 +111,23 @@ class RiskGate:
                         return Verdict(False, f"would widen the stop {cur_stop}->{new_stop} - never loosen a stop", a)
                     if not tighter:
                         return Verdict(True, "risk-reducing (stop unchanged / target adjust)", a)   # no-op on stop: allow
-                # trailing guard: don't suffocate a trend position with a stop inside normal noise
+                init_risk = abs(pos.entry_px - (pos.stop_px or pos.entry_px)) or (pos.entry_px * self.r.max_stop_distance_pct / 100)
+                r_now = ((pos.mark_px - pos.entry_px) if is_long else (pos.entry_px - pos.mark_px)) / init_risk if init_risk else 0
+                at_or_beyond_be = (a.stop_loss_px >= pos.entry_px) if is_long else (a.stop_loss_px <= pos.entry_px)
+                # earning BREAKEVEN: a stop at/beyond entry may only be set once the trade has earned it - the
+                # scale-out engine grants BE deterministically at +1.5R; the model may not front-run it.
+                if at_or_beyond_be and r_now < self.r.breakeven_min_r:
+                    return Verdict(False, f"stop at/beyond entry at only {r_now:+.1f}R - breakeven is earned at "
+                                          f"+{self.r.breakeven_min_r}R (scale-out grants it automatically at +1.5R); leave the stop", a)
+                # trailing guard: don't suffocate a trend position with a stop inside normal noise. Early in the trade
+                # (< early_trail_r) the floor is a FULL ATR - 0.75x-ATR trails across a whole book die to one ordinary bounce.
                 atr_pct = ((market or {}).get("perps", {}).get(a.coin) or {}).get("atr14_1h_pct")
-                min_dist_pct = max((atr_pct or 0) * self.r.min_stop_atr_mult, self.r.min_stop_pct)
+                mult = self.r.min_stop_atr_mult if r_now >= self.r.early_trail_r else self.r.min_stop_atr_mult_early
+                min_dist_pct = max((atr_pct or 0) * mult, self.r.min_stop_pct)
                 dist_pct = abs(pos.mark_px - a.stop_loss_px) / pos.mark_px * 100
                 if dist_pct < min_dist_pct:
-                    init_risk = abs(pos.entry_px - (pos.stop_px or pos.entry_px)) or (pos.entry_px * self.r.max_stop_distance_pct / 100)
-                    r_now = ((pos.mark_px - pos.entry_px) if pos.size > 0 else (pos.entry_px - pos.mark_px)) / init_risk if init_risk else 0
-                    at_or_beyond_be = (a.stop_loss_px >= pos.entry_px) if pos.size > 0 else (a.stop_loss_px <= pos.entry_px)
                     if not (r_now >= self.r.breakeven_after_r and at_or_beyond_be):
-                        return Verdict(False, f"stop {dist_pct:.2f}% from mark is inside noise (min {min_dist_pct:.2f}% = max({self.r.min_stop_atr_mult}x ATR {atr_pct or 0:.2f}%, {self.r.min_stop_pct}%)); "
+                        return Verdict(False, f"stop {dist_pct:.2f}% from mark is inside noise (min {min_dist_pct:.2f}% = max({mult}x ATR {atr_pct or 0:.2f}%, {self.r.min_stop_pct}%)); "
                                               f"position is {r_now:+.1f}R - tighten only once >= {self.r.breakeven_after_r}R", a)
                 # trailing TAKE-PROFIT: extending the target is allowed only on a protected trade (>= +1R and stop at/beyond entry)
                 if a.take_profit_px is not None and pos.tp_px is not None:

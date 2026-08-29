@@ -86,11 +86,50 @@ class Agent:
                                         "token_id": key if kind == "pm_sell" else None, "reason": why, "confidence": 1.0},
                                         True, "auto: " + why,
                                         {"ok": True, "detail": text, "raw": {"realized_pnl": float(pnl), "coin": key, "fill_px": prices.get(key)}})
+                if why == "STOP hit" and prices.get(key):
+                    o = self.learner.open.get(key) or {}
+                    side = o.get("side") or ((o.get("act") or {}).get("side"))
+                    if side:
+                        ew = self.state.get("exit_watch") or []
+                        ew.append({"coin": key, "side": side, "exit_ts": time.time(), "exit_px": prices.get(key),
+                                   "tp_px": o.get("tp_px") or ((o.get("act") or {}).get("take_profit_px")), "why": why})
+                        self.state.set("exit_watch", ew[-40:])
                 lesson = self.learner.record_close(key, float(pnl), prices.get(key), why)
                 if lesson:
                     log.info(lesson)
         for ev in self.learner.update_shadows(prices):
             log.info(f"[dim]{ev}[/]")
+
+    def _score_exits(self) -> None:
+        """Counterfactual for stop-outs: 4h after a STOP exit, measure the max favorable excursion the trade would
+        still have seen - so 'are the stops too tight?' becomes answerable from the journal (state key exit_quality)."""
+        ew = self.state.get("exit_watch") or []
+        if not ew:
+            return
+        now = time.time()
+        keep = [w for w in ew if now - w["exit_ts"] < 4 * 3600]
+        due = [w for w in ew if now - w["exit_ts"] >= 4 * 3600]
+        for w in due:
+            try:
+                cs = self.md.info.candles_snapshot(w["coin"], "15m", int(w["exit_ts"] * 1000), int((w["exit_ts"] + 4 * 3600) * 1000))
+                if not cs:
+                    continue
+                highs = [float(k["h"]) for k in cs]
+                lows = [float(k["l"]) for k in cs]
+                fav = (w["exit_px"] - min(lows)) if w["side"] == "short" else (max(highs) - w["exit_px"])
+                mfe_pct = round(fav / w["exit_px"] * 100, 2)
+                tp_hit = None
+                if w.get("tp_px"):
+                    tp_hit = bool(min(lows) <= w["tp_px"]) if w["side"] == "short" else bool(max(highs) >= w["tp_px"])
+                q = self.state.get("exit_quality") or []
+                q.append({"coin": w["coin"], "side": w["side"], "exit_ts": w["exit_ts"], "mfe_pct": mfe_pct, "tp_hit": tp_hit})
+                self.state.set("exit_quality", q[-60:])
+                log.info(f"[dim]exit-quality {w['coin']} {w['side']}: {mfe_pct:+.2f}% max favorable move in the 4h AFTER the stop-out"
+                         + (f"; original TP would {'HAVE HIT' if tp_hit else 'NOT have hit'}" if tp_hit is not None else "") + "[/]")
+            except Exception:
+                log.exception("exit scoring")
+        if due:
+            self.state.set("exit_watch", keep)
 
     def _close_stale(self, snap: AccountSnapshot, prices: Dict[str, float], cycle_id: int) -> None:
         """Force-close perps older than risk.max_position_age_hours (stale theses drift)."""
@@ -658,6 +697,7 @@ class Agent:
         regime = regime_tag(market)
 
         self._housekeep(prices)
+        self._score_exits()
         self._autoprotect_pm(prices)                      # give held PM positions default stop/target if the model left them unset
         snap = self.snapshot(prices)
         self.state.set("live_snapshot", {"ts": time.time(), "equity": snap.equity_usd, "snapshot": snap.model_dump()})  # fresh before the slow LLM step

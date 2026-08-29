@@ -136,7 +136,10 @@ class RiskCfg(BaseModel):
     max_stop_distance_pct: float = 6
     min_seconds_between_orders: int = 60
     max_orders_per_hour: int = 12
-    min_stop_atr_mult: float = 0.75
+    min_stop_atr_mult: float = 0.75          # trailing floor once the trade is up early_trail_r
+    min_stop_atr_mult_early: float = 1.0     # trailing floor BEFORE early_trail_r - a full ATR of room
+    early_trail_r: float = 1.5
+    breakeven_min_r: float = 1.2             # a stop at/beyond entry must be earned (scale-out grants BE at +1.5R)
     min_stop_pct: float = 0.5
     breakeven_after_r: float = 2.0
     tp_extend_min_confidence: float = 0.75

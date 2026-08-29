@@ -206,8 +206,10 @@ HOW TO DECIDE
     uptrend, wait for the 15m dip-and-turn rather than buying a stretched 15m candle. vol_burst_15m > 2 = the move is
     happening NOW. A 15m-only signal against the 1h trend is a scalp: allowed on movers, but say so and use a tighter
     target. Use atr14_15m_pct to place stops on movers - the 1h ATR is too coarse for a 5-minute-cycle coin.
-  - TRAILING: stops tighter than ~0.75x the coin's 1h ATR (or 0.5%) from the mark are rejected until the position is up
-    2R - inside that band you are stopping yourself out on noise. Trail in ATR steps, not every cycle.
+  - TRAILING: below +{cfg.risk.early_trail_r}R, stops tighter than 1x the coin's 1h ATR (or 0.5%) from the mark are
+    rejected; after +{cfg.risk.early_trail_r}R the floor relaxes to ~{cfg.risk.min_stop_atr_mult}x ATR. A stop at/beyond
+    entry (locking breakeven) is rejected below +{cfg.risk.breakeven_min_r}R - the scale-out engine grants BE automatically
+    at +1.5R. Trail on structure (new swing high/low on the 15m), in ATR steps, not every cycle.
     The noise band constrains TIGHTENING ONLY. A stop that already sits close to the mark stays where it is - NEVER
     propose moving a stop AWAY from the mark to "get outside the noise band" or "protect" anything: any stop farther
     from the mark than the current stop is loosening and is auto-rejected, whatever the stated reason.
@@ -306,12 +308,17 @@ You may ONLY use kinds: hold, update_stop, close_perp, spot_sell, pm_sell, pm_up
 Rules (enforced in code - violations are rejected):
   - NEVER widen a stop (perp or PM). Loosening is always rejected - including "moving the stop outside the noise
     band": the band constrains tightening only; a stop that already sits close to the mark simply stays.
-  - Trailing: no perp stop tighter than ~0.75x the coin's 1h ATR from mark until the position is up 2R -
-    inside that band you stop yourself out on noise. Trail scalps in atr14_15m_pct steps, swings in 1h-ATR steps.
+  - Trailing floors (enforced): below +{cfg.risk.early_trail_r}R a stop must leave a FULL 1h ATR of room; after that,
+    ~{cfg.risk.min_stop_atr_mult}x ATR. Inside those bands you stop yourself out on ordinary noise. Trail scalps in
+    atr14_15m_pct steps, swings in 1h-ATR steps.
   - A close that REALISES A LOSS is reviewed by a verifier - state the thesis-break reason honestly.
   - update_stop: stop_loss_px and/or take_profit_px on the named coin. pm_update: TOKEN-price stop/target on token_id.
-Judgement guide: move the stop to breakeven after +1R; trail winners while the 15m trend holds; close on thesis break
-or momentum reversal instead of waiting for the stop; bank stalled winners - capital parked in a dead trade is a cost
+Judgement guide: breakeven is EARNED, not grabbed - a stop at/beyond entry is rejected below +{cfg.risk.breakeven_min_r}R
+(the scale-out engine grants BE automatically at +1.5R; do not front-run it). Trail on 15m STRUCTURE, not on green
+candles: for a short, tighten only after a NEW LOWER HIGH forms on the 15m (mirror for longs) - "price moved my way"
+alone is not a reason to trail. NEVER tighten more than half the open book in one look: uniform tight stops on a
+correlated basket all die to the same bounce - stagger your trails across looks. Close on thesis break or momentum
+reversal instead of waiting for the stop; bank stalled winners - capital parked in a dead trade is a cost
 (the mandate rewards speed). A scalp that lost its 15m trend (tf_align_15m false, trend_15m against you) is done.
 live_15m is the current UNCONFIRMED 15m candle: timing info only, never proof of a trend change.
 Do NOT churn: if the stops are right and the trade is working, reply actions=[] or hold.
