@@ -151,7 +151,7 @@ class Agent:
             if res.ok:
                 self.notify.send(f"AUTO-PROTECT PM '{q.outcome}': stop {stop} target {tp} ({q.question[:40]})", "warning")
 
-    def tick(self) -> str:
+    def tick(self, may_fire: bool = True) -> str:
         """30s sensor: run the cheap guard, then decide whether anything warrants an immediate decision cycle.
         Returns a wake reason ('' = keep sleeping). Free - prices only, no LLM, cached indicators."""
         raw = self.md.all_mids()
@@ -162,6 +162,8 @@ class Agent:
         resting = self.state.get("resting_orders") or []
         if resting:
             self._check_resting(resting, raw, prices)
+        if not may_fire:
+            return ""     # storm-guard window: stops/fills above still ran; alarms stay ARMED instead of being consumed (M1)
         l = self.cfg.llm
         now = time.time()
         # 1) model-declared watch levels (one-shot alarms)
@@ -425,36 +427,67 @@ class Agent:
 
     def _check_resting(self, rest: list, mids: Dict[str, float], prices: Dict[str, float]) -> None:
         """30s tick: fill resting limits that price has touched; expire stale ones. Approval happened at placement;
-        only structural facts (position cap) are re-checked at fill time."""
-        keep = []
+        structural facts are re-checked at trigger (halt, position cap, gapped-through stop, gross exposure), and
+        each order is REMOVED FROM PERSISTED STATE BEFORE its side effects so a crash cannot double-fill it (M2)."""
         ttl = self.cfg.risk.limit_order_ttl_min * 60
         cid = self.state.last_cycle_id()
-        for r in rest:
-            a = Action.model_validate(r["action"])
-            px = mids.get(a.coin)
-            if time.time() - r["ts"] > ttl:
-                self.state.record_order(cid, a.model_dump(), True, "limit expired unfilled - canceled",
-                                        {"ok": False, "detail": f"expired after {self.cfg.risk.limit_order_ttl_min}m unfilled"})
-                self.notify.send(f"CANCELED limit {a.side} {a.coin} @ {a.limit_price}: unfilled for {self.cfg.risk.limit_order_ttl_min}m", "info")
-                continue
-            hit = px and ((a.side == "long" and px <= a.limit_price) or (a.side == "short" and px >= a.limit_price))
-            if not hit:
-                keep.append(r)
-                continue
-            snap = self.snapshot(prices)
-            if len(snap.perps) >= self.cfg.risk.max_open_positions and a.coin not in {p.coin for p in snap.perps}:
-                self.state.record_order(cid, a.model_dump(), True, "limit canceled at trigger: position cap reached",
-                                        {"ok": False, "detail": "position cap reached before fill"})
-                self.notify.send(f"CANCELED limit {a.coin}: position cap reached before fill", "warning")
-                continue
-            res = self.venues["hl"].execute(a, {**prices, a.coin: px})
-            self.state.record_order(cid, a.model_dump(), True, r["reason"] + " | limit filled", res.model_dump())
-            self.notify.send(f"{'FILLED' if res.ok else 'FAILED'} limit {a.side} {a.coin} ${a.size_usd or 0:.0f} @ {a.limit_price}: {res.detail}",
-                             "info" if res.ok else "error")
-            if res.ok:
-                self.learner.record_open(self.trade_key(a), a, r.get("risk_usd") or 0.0, r.get("regime") or "",
-                                         (res.raw or {}).get("fill_px") or a.limit_price, r.get("view") or "")
-        self.state.set("resting_orders", keep)
+        remaining = list(rest)
+
+        def _drop(r) -> None:                              # persist removal FIRST - crash-safe
+            remaining.remove(r)
+            self.state.set("resting_orders", remaining)
+
+        for r in list(rest):
+            try:
+                a = Action.model_validate(r["action"])
+                px = mids.get(a.coin)
+                if time.time() - r["ts"] > ttl:
+                    _drop(r)
+                    self.state.record_order(cid, a.model_dump(), True, "limit expired unfilled - canceled",
+                                            {"ok": False, "detail": f"expired after {self.cfg.risk.limit_order_ttl_min}m unfilled"})
+                    self.notify.send(f"CANCELED limit {a.side} {a.coin} @ {a.limit_price}: unfilled for {self.cfg.risk.limit_order_ttl_min}m", "info")
+                    continue
+                hit = px and ((a.side == "long" and px <= a.limit_price) or (a.side == "short" and px >= a.limit_price))
+                if not hit:
+                    continue
+
+                def _cancel(why: str) -> None:
+                    _drop(r)
+                    self.state.record_order(cid, a.model_dump(), True, f"limit canceled at trigger: {why}", {"ok": False, "detail": why})
+                    self.notify.send(f"CANCELED limit {a.side} {a.coin} @ {a.limit_price}: {why}", "warning")
+
+                # M3: re-check what may have changed while the order rested
+                if self.state.get("daily_halt"):
+                    _cancel("daily-loss halt active")
+                    continue
+                if a.stop_loss_px and ((a.side == "long" and px <= a.stop_loss_px) or (a.side == "short" and px >= a.stop_loss_px)):
+                    _cancel(f"price {px} already beyond the stop {a.stop_loss_px} (gapped through while resting)")
+                    continue
+                snap = self.snapshot(prices)
+                if len(snap.perps) >= self.cfg.risk.max_open_positions and a.coin not in {p.coin for p in snap.perps}:
+                    _cancel("position cap reached before fill")
+                    continue
+                gross = sum(pp.notional_usd for pp in snap.perps) + (a.size_usd or 0)
+                if snap.equity_usd and gross > snap.equity_usd * self.cfg.risk.max_gross_exposure_pct / 100:
+                    _cancel(f"gross exposure would exceed {self.cfg.risk.max_gross_exposure_pct}% at fill")
+                    continue
+                held = next((pp for pp in snap.perps if pp.coin == a.coin and (pp.size > 0) == (a.side == "long")), None)
+                if held and held.stop_px and a.stop_loss_px:   # C1: a delayed fill must never loosen a since-tightened stop
+                    tighter = a.stop_loss_px >= held.stop_px if a.side == "long" else a.stop_loss_px <= held.stop_px
+                    if not tighter:
+                        a.stop_loss_px = held.stop_px
+
+                _drop(r)                                   # M2: persisted out before execution
+                res = self.venues["hl"].execute(a, {**prices, a.coin: px})
+                self.state.record_order(cid, a.model_dump(), True, r["reason"] + " | limit filled", res.model_dump())
+                self.notify.send(f"{'FILLED' if res.ok else 'FAILED'} limit {a.side} {a.coin} ${a.size_usd or 0:.0f} @ {a.limit_price}: {res.detail}",
+                                 "info" if res.ok else "error")
+                if res.ok:
+                    self.learner.record_open(self.trade_key(a), a, r.get("risk_usd") or 0.0, r.get("regime") or "",
+                                             (res.raw or {}).get("fill_px") or a.limit_price, r.get("view") or "")
+            except Exception:
+                log.exception("resting order check failed")
+        self.state.set("resting_orders", remaining)
 
     def _manage_due(self, snap: AccountSnapshot, perps_md: Dict, now: float) -> str:
         """Why the position manager should look now ('' = nothing). Shared by the 30s tick and the cycle."""
@@ -506,8 +539,6 @@ class Agent:
         market = market or {}
         if not l.skip_if_quiet:
             return ""
-        if getattr(self, "_wake", "").startswith("watch level"):
-            return ""                                      # the model asked to be woken at this price - let it look
         # hard triggers: unprotected position or a position near its stop/TP.
         # With the position-manager brain enabled these are ITS wake conditions - the full entry agent stays asleep.
         if not l.manager_enabled:
@@ -523,6 +554,8 @@ class Agent:
                 return f"daily LLM call budget reached ({today['calls']}/{l.max_calls_per_day}) - flat, waiting for next UTC day"
             if today.get("cost_usd", 0.0) >= l.max_usd_per_day:
                 return f"daily LLM spend cap reached (${today['cost_usd']:.2f}/${l.max_usd_per_day:.2f}) - only stop/TP proximity triggers a call until next UTC day"
+        if getattr(self, "_wake", "").startswith("watch level"):
+            return ""                                      # model-requested wake - honored, but only within the daily budget (C2)
         last_ts = self.state.get("last_llm_ts") or 0
         last_px = self.state.get("last_llm_prices") or {}
         last_sig = self.state.get("last_llm_signals") or {}
@@ -905,14 +938,15 @@ class Agent:
                     self.flatten_and_die("manual kill file", self.md.all_mids())
                 self._restart_if_changed(baseline)
                 if i and i % tick_every == 0:
+                    may_fire = time.time() - last_cycle_end >= cfg.llm.min_cycle_gap_seconds
                     wake = ""
                     try:
-                        wake = self.tick()
+                        wake = self.tick(may_fire)
                     except SystemExit:
                         raise
                     except Exception:
                         log.exception("tick error")
-                    if wake and time.time() - last_cycle_end >= cfg.llm.min_cycle_gap_seconds:
+                    if wake and may_fire:
                         log.info(f"[bold]wake[/] {wake}")
                         self.state.set("wake_reason", wake)
                         break

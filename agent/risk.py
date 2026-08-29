@@ -342,6 +342,14 @@ class RiskGate:
                     dist = abs(ref - a.stop_loss_px) / ref * 100
                     if dist > self.r.max_stop_distance_pct:
                         return Verdict(False, f"stop {dist:.1f}% away > max {self.r.max_stop_distance_pct}%", a)
+            # C1 guard: adding to a held same-side position must never carry a looser stop than the one already
+            # protecting it - the venue merges stops on add, and same-side adds skip the verifier.
+            held_pos = next((p for p in snap.perps if p.coin == a.coin and (p.size > 0) == (a.side == "long")), None)
+            if held_pos and held_pos.stop_px and a.stop_loss_px:
+                tighter = a.stop_loss_px >= held_pos.stop_px if a.side == "long" else a.stop_loss_px <= held_pos.stop_px
+                if not tighter:
+                    clamps.append(f"stop {a.stop_loss_px}->{held_pos.stop_px} (never loosen on add)")
+                    a.stop_loss_px = held_pos.stop_px
 
         if a.kind == "spot_buy":
             if a.coin not in self.cfg.universe.spot:

@@ -99,7 +99,12 @@ class PaperVenue(Venue):
             pos["entry_px"] = (pos["entry_px"] * abs(pos["size"]) + fill * abs(size)) / abs(new_size)
             pos["size"] = new_size
             pos["leverage"] = a.leverage or pos["leverage"]
-            pos["stop_px"] = a.stop_loss_px or pos.get("stop_px")
+            cur_stop = pos.get("stop_px")
+            if a.stop_loss_px and cur_stop:            # NEVER loosen a stop via an add (C1)
+                tighter = a.stop_loss_px >= cur_stop if is_long else a.stop_loss_px <= cur_stop
+                pos["stop_px"] = a.stop_loss_px if tighter else cur_stop
+            else:
+                pos["stop_px"] = a.stop_loss_px or cur_stop
             pos["tp_px"] = a.take_profit_px or pos.get("tp_px")
         else:
             self.p["perps"][a.coin] = {"size": size, "entry_px": fill, "leverage": a.leverage or 1,
@@ -183,7 +188,8 @@ class PaperVenue(Venue):
                                                  "shares": 0.0, "avg_price": fill, "ends": meta.get("ends")})
         q["avg_price"] = (q["avg_price"] * q["shares"] + fill * shares) / (q["shares"] + shares)
         q["shares"] += shares
-        if a.stop_loss_px is not None: q["stop_px"] = a.stop_loss_px
+        if a.stop_loss_px is not None:                 # PM tokens are long: tighter = higher stop; never loosen on an add (C1)
+            q["stop_px"] = max(a.stop_loss_px, q["stop_px"]) if q.get("stop_px") else a.stop_loss_px
         if a.take_profit_px is not None: q["tp_px"] = a.take_profit_px
         self.p["cash"] -= a.size_usd
         lv = f" stop {q.get('stop_px')} target {q.get('tp_px')}" if q.get("stop_px") or q.get("tp_px") else ""
