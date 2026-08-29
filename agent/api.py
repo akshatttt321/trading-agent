@@ -139,6 +139,11 @@ def status():
         "last_cycle_ts": last["ts"],
         "last_tick_ts": (live or {}).get("ts") or last["ts"],
         "watch_levels": meta(c, "watch_levels") or [],
+        "market_brief": meta(c, "market_brief"),
+        "exit_quality": (meta(c, "exit_quality") or [])[-12:],
+        "resting_orders": [{**{k: (r.get("action") or {}).get(k) for k in ("coin", "side", "size_usd", "limit_price", "stop_loss_px", "take_profit_px")}, "ts": r.get("ts")}
+                           for r in (meta(c, "resting_orders") or [])],
+        "research_today": meta(c, "research_today"),
         "cycles_total": total,
         "llm_model": f"{cfg.llm.proposer.provider}:{cfg.llm.proposer.model}" + (f" + verifier {cfg.llm.verifier.provider}:{cfg.llm.verifier.model}" if cfg.llm.verifier.enabled else ""),
         "tokens_total": meta(c, "tokens_total"),
