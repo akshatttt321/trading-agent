@@ -463,13 +463,17 @@ class Agent:
         last_px = self.state.get("last_manage_prices") or {}
         if now - last_ts >= l.manager_interval_min * 60:
             return f"interval {l.manager_interval_min}m"
+        move_ok = now - last_ts >= l.manager_move_gap_min * 60      # spacing applies to the move trigger only
         for p in snap.perps:
             if p.stop_px is None:
                 return f"{p.coin} unprotected"
-            atr15 = (perps_md.get(p.coin) or {}).get("atr14_15m_pct") or (perps_md.get(p.coin) or {}).get("atr14_1h_pct") or 1.0
-            ref = last_px.get(p.coin)
-            if ref and abs(p.mark_px / ref - 1) * 100 >= atr15 * l.manager_min_move_atr15:
-                return f"{p.coin} moved {abs(p.mark_px / ref - 1) * 100:.2f}%"
+            if move_ok:
+                atr15 = (perps_md.get(p.coin) or {}).get("atr14_15m_pct") or (perps_md.get(p.coin) or {}).get("atr14_1h_pct") or 1.0
+                floor = l.manager_move_floor_pct.get(self.cfg.universe.bucket_of(p.coin) or "midcaps", 0.5)
+                bar = max(atr15 * l.manager_min_move_atr15, floor)   # noise floor scales with the coin class
+                ref = last_px.get(p.coin)
+                if ref and abs(p.mark_px / ref - 1) * 100 >= bar:
+                    return f"{p.coin} moved {abs(p.mark_px / ref - 1) * 100:.2f}% (bar {bar:.2f}%)"
             # near-level is ONE-SHOT per (coin, stop, tp): the level executes deterministically on the tick anyway,
             # so the manager looks once per level - re-armed only when the stop/TP changes. Without this, a tight
             # trailing stop keeps the position permanently "near" and burns a manager call every cycle.
