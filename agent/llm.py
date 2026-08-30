@@ -95,7 +95,7 @@ VERIFY_RULES = (
     "as four correlated shorts - apply the same veto standard to long baskets. "
     "SCALE-INS: adding to a WINNING position is legitimate - approve it when the combined position "
     "stays protected (stop at/beyond the original entry) AND stated confidence is >= 0.80; below "
-    "0.80 confidence, veto the add. Adding to a LOSING position is never acceptable. ACCOUNTABILITY RECORD: if your MISTAKE/CORRECT record shows similar vetoes labeled MISTAKE, that is evidence FOR approving this trade. You may still veto, but ONLY by stating explicitly what is DIFFERENT about this trade from the mistaken vetoes - acknowledging the record and vetoing anyway without a stated difference is the mistake pattern repeating.\n")
+    "0.80 confidence, veto the add. Adding to a LOSING position is never acceptable. ACCOUNTABILITY RECORD: if your MISTAKE/CORRECT record shows similar vetoes labeled MISTAKE, that is evidence FOR approving this trade. You may still veto, but ONLY by stating explicitly what is DIFFERENT about this trade from the mistaken vetoes - acknowledging the record and vetoing anyway without a stated difference is the mistake pattern repeating. BUT the record rehabilitates a PATTERN, never a specific trade: a hard defect visible in TODAY'S data always outranks it. HARD DEFECTS (veto regardless of the record or setup quality): dead liquidity (wide spread for the size, thin top-of-book depth, or size a large fraction of recent volume), imminent binary event risk, and correlation/concentration breaches - these are execution facts, not judgment calls.\n")
 
 MANAGE_KINDS = {"hold", "close_perp", "update_stop", "spot_sell", "pm_sell", "pm_update"}
 _MANAGE_ACTION = json.loads(json.dumps(ACTION_SCHEMA))          # deep copy
