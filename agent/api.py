@@ -144,6 +144,12 @@ def status():
         "resting_orders": [{**{k: (r.get("action") or {}).get(k) for k in ("coin", "side", "size_usd", "limit_price", "stop_loss_px", "take_profit_px")}, "ts": r.get("ts")}
                            for r in (meta(c, "resting_orders") or [])],
         "research_today": meta(c, "research_today"),
+        "shadow_trades": {
+            "open": [{k: sh.get(k) for k in ("coin", "side", "entry_px", "mark_px", "live_r", "stop_px", "tp_px", "size_usd", "by", "reason", "ts")}
+                     for sh in (meta(c, "shadow_trades") or []) if sh.get("status") == "open"][-15:],
+            "resolved": [{k: sh.get(k) for k in ("coin", "side", "entry_px", "stop_px", "tp_px", "by", "status", "r", "ts")}
+                         for sh in (meta(c, "shadow_trades") or []) if sh.get("status") != "open"][-10:],
+        },
         "cycles_total": total,
         "llm_model": f"{cfg.llm.proposer.provider}:{cfg.llm.proposer.model}" + (f" + verifier {cfg.llm.verifier.provider}:{cfg.llm.verifier.model}" if cfg.llm.verifier.enabled else ""),
         "tokens_total": meta(c, "tokens_total"),

@@ -169,6 +169,9 @@ class Learner:
                 continue
             long = s["side"] == "long"
             risk = abs(s["entry_px"] - s["stop_px"]) or 1e-9
+            s["mark_px"] = px                                  # live view for the dashboard
+            s["live_r"] = round(((px - s["entry_px"]) if long else (s["entry_px"] - px)) / risk, 2)
+            changed = True
             hit_stop = px <= s["stop_px"] if long else px >= s["stop_px"]
             hit_tp = px >= s["tp_px"] if long else px <= s["tp_px"]
             expired = time.time() - s["ts"] > self.l.shadow_expiry_hours * 3600
