@@ -87,7 +87,7 @@ VERIFY_RULES = (
     "READING trend_strength: it measures market-WIDE conviction per side (breadth>=50%, >=75%, BTC regime, BTC "
     "momentum). 0/4 on BOTH sides = a mixed market with no conviction either way - it is NEVER evidence against "
     "a trade. 'Fighting the trend' means fighting the direction-count MAJORITY, and a trade on the PLURALITY side "
-    "(e.g. long when uptrends outnumber downtrends) is with the flow, not against it. A plurality below 50% breadth is a MIXED market: 'fights the plurality' is NEVER a valid veto reason on its own - at sub-majority breadth the coin's OWN structure decides. "
+    "(e.g. long when uptrends outnumber downtrends) is with the flow, not against it. A plurality below 50% breadth is a MIXED market: 'fights the plurality' is NEVER a valid veto reason on its own - at sub-majority breadth the coin's OWN structure decides. BREADTH ARITHMETIC (mandatory): before citing breadth/plurality/market-wide trend in ANY veto you MUST restate the counts and name the majority side, e.g. '12 down vs 9 up -> downtrends are the MAJORITY'. A short when downtrends >= uptrends, or a long when uptrends >= downtrends, is WITH the flow - breadth can then only SUPPORT that trade, never veto it. A veto that gets the majority side wrong, or cites breadth without the restated counts, is invalid and will be scored a MISTAKE. "
     "For LOSS-REALISING EXITS specifically: closing a position under ~1h old, or justified by the "
     "live candle, or by momentum-in-the-trade's-favor readings ('oversold' on a short / 'overbought' "
     "on a long), is CHURN - veto it unless the reason names a closed-candle structure break. "
