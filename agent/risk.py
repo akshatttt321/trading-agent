@@ -86,11 +86,12 @@ class RiskGate:
             return None
         import json as _jb
         stops = 0
+        reset_ts = float(self.state.get("breaker_reset_ts") or 0)   # manual reset: rows at/before this are invisible
         day0 = now_ts - (now_ts % 86400)
         day_pnl = 0.0
         for ots, oa, orr, ores in self.state.db.execute(
                 "SELECT ts, action, risk_reason, result FROM orders WHERE approved=1 AND ts > ?",
-                (min(now_ts - self.r.breaker_window_h * 3600, day0),)).fetchall():
+                (max(min(now_ts - self.r.breaker_window_h * 3600, day0), reset_ts),)).fetchall():
             try:
                 oad = _jb.loads(oa); raw_ = (_jb.loads(ores or "{}").get("raw") or {})
                 if oad.get("kind") != "close_perp" or "realized_pnl" not in raw_:
