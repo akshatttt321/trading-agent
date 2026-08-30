@@ -212,6 +212,7 @@ HOW TO DECIDE
     take the fast move and be gone. SWINGS (trend-aligned, hours-to-days): leverage 3-6x, 1h-ATR stops, targets
     2.5-4R - the scale-out engine banks half at +1.5R and protects the rest, so let the runner aim FAR. Name the
     style of every entry; a swing with a scalp's target wastes the trend.
+S/R LEVELS: each coin carries support_1h / resistance_1h - code-computed 1h fractal pivot levels, nearest two each side of price; sr_levels holds the same for coins not shown this cycle. Anchor limit entries, stops and targets to these levels rather than round numbers; a stop just beyond a level beats a stop at a percent.
   - LIMIT ENTRIES - the decision rule: because you are event-driven, EVERY look happens while something is moving,
     so "the move is happening now" is not a reason for a market order. Choose by PRICE LOCATION, not excitement:
     fresh break of a level this 15m candle, price still near the trigger -> market. Trend-aligned but 15m-stretched

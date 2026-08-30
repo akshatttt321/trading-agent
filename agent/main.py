@@ -280,9 +280,9 @@ class Agent:
         b = self.state.get("market_brief") or {}
         if (time.time() - (b.get("ts") or 0)) / 3600 >= self.cfg.llm.ydc_brief_interval_h:
             content = ydc.finance_research(
-                "Crypto market brief for a perp trader, max 200 words, bullets, numbers over prose: BTC and ETH key "
-                "support/resistance this week with liquidation clusters if reported, funding-rate extremes across major "
-                "perps, and macro events in the next 72h that could move crypto.", "standard", timeout=75)
+                "Crypto market brief for a perp trader, max 200 words, bullets, numbers over prose: BTC and ETH "
+                "liquidation clusters if reported, funding-rate extremes across major perps, notable sector "
+                "rotation this week, and macro events in the next 72h that could move crypto.", "standard", timeout=75)
             if content:
                 b = {"ts": time.time(), "content": content[:1500]}
                 self.state.set("market_brief", b)
@@ -829,6 +829,12 @@ class Agent:
         quiet_reason = self._quiet_reason(snap, prices, market)
         if not quiet_reason and not shown:
             quiet_reason = "no coin due in any bucket"
+        if not quiet_reason:
+            # COST GATE ABOVE THE PROPOSER: if the circuit breaker forbids every new perp entry anyway, the paid
+            # entry look is pure waste - skip it for free. PM cadence still converts this into a pm-scoped look below.
+            br = self.risk.breaker_status(snap, cycle_start_ts)
+            if br:
+                quiet_reason = f"{br} - entry look skipped (free)"
         pm_scope = False
         if quiet_reason and pm_due:
             # PM-SCOPED look: perps are quiet but the prediction-market cadence / move-trigger is due. Pay for a
@@ -871,6 +877,10 @@ class Agent:
         h_utc = time.gmtime().tm_hour
         sess = "asia" if h_utc < 7 else "europe" if h_utc < 13 else "us" if h_utc < 21 else "late"
         market_prompt["session"] = {"utc_hour": h_utc, "session": sess}
+        if not pm_scope:
+            market_prompt["sr_levels"] = {c: {"s": v.get("support_1h"), "r": v.get("resistance_1h")}
+                                          for c, v in perps_all.items()
+                                          if (v.get("support_1h") or v.get("resistance_1h")) and c not in market_prompt["perps"]}
         if not pm_scope:
             brief = self._market_brief()
             if brief:

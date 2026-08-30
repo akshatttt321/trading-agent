@@ -79,6 +79,36 @@ class RiskGate:
         return False, ""
 
     # ------------------------------------------------------------------- action
+    def breaker_status(self, snap: AccountSnapshot, now_ts: float) -> Optional[str]:
+        """LOSS CIRCUIT BREAKER: repeated stop-outs or a bleeding day mean the regime is misread - pause NEW perp
+        entries (managing/stops/PM unaffected). Free; checked BEFORE the paid proposer look AND inside the gate."""
+        if not self.r.breaker_stopouts:
+            return None
+        import json as _jb
+        stops = 0
+        day0 = now_ts - (now_ts % 86400)
+        day_pnl = 0.0
+        for ots, oa, orr, ores in self.state.db.execute(
+                "SELECT ts, action, risk_reason, result FROM orders WHERE approved=1 AND ts > ?",
+                (min(now_ts - self.r.breaker_window_h * 3600, day0),)).fetchall():
+            try:
+                oad = _jb.loads(oa); raw_ = (_jb.loads(ores or "{}").get("raw") or {})
+                if oad.get("kind") != "close_perp" or "realized_pnl" not in raw_:
+                    continue
+                if ots >= day0:
+                    day_pnl += float(raw_["realized_pnl"])
+                if ots > now_ts - self.r.breaker_window_h * 3600 and str(orr or "").startswith("auto: STOP"):
+                    stops += 1
+            except Exception:
+                continue
+        if stops >= self.r.breaker_stopouts:
+            return (f"CIRCUIT BREAKER: {stops} perp stop-outs in {self.r.breaker_window_h:.0f}h - "
+                    f"the regime is disagreeing; new entries paused (managing continues)")
+        if day_pnl <= -snap.equity_usd * self.r.breaker_daily_loss_pct / 100:
+            return (f"CIRCUIT BREAKER: day realized perp pnl ${day_pnl:.2f} beyond "
+                    f"-{self.r.breaker_daily_loss_pct}% of equity - new entries paused")
+        return None
+
     def evaluate(self, a: Action, snap: AccountSnapshot, cycle_start_ts: float = 0.0, funding: Optional[dict] = None, regime: str = "", market: Optional[dict] = None) -> Verdict:
         """cycle_start_ts: orders placed in the current cycle are exempt from the inter-order cooldown
         (a single decision may legitimately contain several actions); the hourly cap still counts them."""
@@ -290,33 +320,11 @@ class RiskGate:
                 if not replaces and len(rest_b) >= self.r.max_resting_orders:
                     return Verdict(False, f"resting book full ({len(rest_b)}/{self.r.max_resting_orders}) - blocked free; "
                                           f"replace an existing limit (same coin+side) or wait for a fill/expiry", a)
-            # LOSS CIRCUIT BREAKER: repeated stop-outs or a bleeding day mean the regime is misread -
-            # pause NEW entries (managing/stops unaffected). In a real trend this never fires.
             import json as _json2
             now_ts = cycle_start_ts
-            if self.r.breaker_stopouts:
-                stops4h = 0
-                day0 = now_ts - (now_ts % 86400)
-                day_pnl = 0.0
-                for ots, oa, orr, ores in self.state.db.execute(
-                        "SELECT ts, action, risk_reason, result FROM orders WHERE approved=1 AND ts > ?",
-                        (min(now_ts - self.r.breaker_window_h * 3600, day0),)).fetchall():
-                    try:
-                        oad = _json2.loads(oa); ord_ = _json2.loads(ores or "{}"); raw_ = ord_.get("raw") or {}
-                        if oad.get("kind") != "close_perp" or "realized_pnl" not in raw_:
-                            continue
-                        if ots >= day0:
-                            day_pnl += float(raw_["realized_pnl"])
-                        if ots > now_ts - self.r.breaker_window_h * 3600 and str(orr or "").startswith("auto: STOP"):
-                            stops4h += 1
-                    except Exception:
-                        continue
-                if stops4h >= self.r.breaker_stopouts:
-                    return Verdict(False, f"CIRCUIT BREAKER: {stops4h} perp stop-outs in {self.r.breaker_window_h:.0f}h - "
-                                          f"the regime is disagreeing; new entries paused (managing continues)", a)
-                if day_pnl <= -snap.equity_usd * self.r.breaker_daily_loss_pct / 100:
-                    return Verdict(False, f"CIRCUIT BREAKER: day's realized perp pnl ${day_pnl:.2f} beyond "
-                                          f"-{self.r.breaker_daily_loss_pct}% of equity - new entries paused", a)
+            br = self.breaker_status(snap, now_ts)
+            if br:
+                return Verdict(False, br, a)
             # LOSS RE-ENTRY COOLDOWN: a coin that just lost money (ANY exit reason) needs fresh structure, not a rematch.
             if self.r.loss_reentry_cooldown_min:
                 for ots, oa, ores in self.state.db.execute(

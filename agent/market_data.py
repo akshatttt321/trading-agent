@@ -169,7 +169,16 @@ class MarketData:
         bb_pos = (ref - (mean - 2 * sd)) / (4 * sd) if sd else 0.5
         vols = [_f(k["v"]) for k in candles]
         vol_ratio = (sum(vols[-24:]) / 24) / (sum(vols[:-24]) / max(len(vols) - 24, 1)) if len(vols) > 48 else None
+        # S/R: fractal pivots (5-candle swing highs/lows) over 8d of CLOSED 1h candles; nearest two each side of price.
+        hh = highs[:-1] if partial else highs
+        ll = lows[:-1] if partial else lows
+        piv_hi = [hh[i] for i in range(2, len(hh) - 2) if hh[i] == max(hh[i - 2:i + 3])]
+        piv_lo = [ll[i] for i in range(2, len(ll) - 2) if ll[i] == min(ll[i - 2:i + 3])]
+        res_lv = sorted(set(p for p in piv_hi if p > last * 1.001))[:2]
+        sup_lv = sorted(set(p for p in piv_lo if p < last * 0.999), reverse=True)[:2]
         return {
+            "resistance_1h": [float(f"{x:.4g}") for x in res_lv] or None,
+            "support_1h": [float(f"{x:.4g}") for x in sup_lv] or None,
             "_returns": [round((closes[i] / closes[i-1] - 1), 5) for i in range(max(1, len(closes) - 72), len(closes))],
             "chg_1h_pct": ago(1),
             "chg_4h_pct": ago(4),
