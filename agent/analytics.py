@@ -131,7 +131,8 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
             if stack:
                 ent = stack.pop()
                 if ent.get("confidence"):
-                    cal_samples.append({"conf": float(ent["confidence"]), "win": float(raw_["realized_pnl"]) > 0, "src": "real"})
+                    cal_samples.append({"conf": float(ent["confidence"]), "win": float(raw_["realized_pnl"]) > 0,
+                                        "src": "real", "ts": r_["ts"]})
     try:
         shrow = c.execute("SELECT value FROM meta WHERE key='shadow_trades'").fetchone()
         for t_ in (_j(shrow[0], []) if shrow else []) or []:
@@ -139,6 +140,11 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
                 cal_samples.append({"conf": float(t_["confidence"]), "win": float(t_["r"]) > 0, "src": "shadow"})
     except Exception:
         pass
+    try:
+        lsrow = c.execute("SELECT value FROM meta WHERE key='live_since'").fetchone()
+        live_since = float(_j(lsrow[0], 0) or 0) if lsrow else 0
+    except Exception:
+        live_since = 0
     cal_buckets = []
     for lo, hi in ((0.0, 0.55), (0.55, 0.60), (0.60, 0.65), (0.65, 0.70), (0.70, 1.01)):
         ss = [x for x in cal_samples if lo <= x["conf"] < hi]
@@ -148,6 +154,7 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
         mid = (lo + min(hi, 1.0)) / 2
         cal_buckets.append({"bucket": f"{lo:.2f}-{min(hi, 1.0):.2f}", "n": len(ss),
                             "real_n": sum(1 for x in ss if x["src"] == "real"),
+                            "live_n": sum(1 for x in ss if live_since and x.get("ts", 0) >= live_since),
                             "stated_mid": round(mid, 3), "win_rate": round(wr, 3), "gap": round(wr - mid, 3)})
 
     # equity per UTC day
@@ -178,7 +185,8 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
             "by_venue": by_venue, "by_coin": by_coin, "by_close_reason": by_close,
             "recent": list(reversed(trades[-20:])),
         },
-        "calibration": {"samples": len(cal_samples), "real": sum(1 for x in cal_samples if x["src"] == "real"),
+        "calibration": {"samples": len(cal_samples), "live_since": live_since or None,
+                        "real": sum(1 for x in cal_samples if x["src"] == "real"),
                         "shadow": sum(1 for x in cal_samples if x["src"] == "shadow"), "buckets": cal_buckets,
                         "note": "win_rate vs stated confidence; negative gap = overconfident at that level"},
         "activity": {"cycles": len(cyc), "quiet_skipped": skipped, "proposer_failures": failed, "trade_proposals": proposed,

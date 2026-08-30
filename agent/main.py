@@ -500,6 +500,8 @@ class Agent:
         rest = []
         for r in prev:                                          # cancel-replace, journaled so the feed shows the old order's fate
             if r["action"].get("coin") == act.coin and r["action"].get("side") == act.side:
+                if r.get("live_oid"):
+                    self.venues["hl"].cancel_order(r["action"].get("coin"), r["live_oid"])
                 self.state.record_order(cycle_id, r["action"], True, "limit replaced by newer proposal",
                                         {"ok": False, "detail": f"replaced by new limit @ {act.limit_price}"})
             else:
@@ -508,8 +510,16 @@ class Agent:
             self.state.record_order(cycle_id, act.model_dump(), False, f"max {self.cfg.risk.max_resting_orders} resting orders", {})
             self.notify.send(f"REJECTED limit {act.coin}: max {self.cfg.risk.max_resting_orders} resting orders", "warning")
             return
-        rest.append({"action": act.model_dump(), "reason": reason, "risk_usd": risk_usd,
-                     "regime": regime, "view": (view or "")[:200], "ts": time.time()})
+        entry = {"action": act.model_dump(), "reason": reason, "risk_usd": risk_usd,
+                 "regime": regime, "view": (view or "")[:200], "ts": time.time()}
+        if self.cfg.mode != "paper":                       # live/testnet: the order rests ON-VENUE (Alo maker)
+            vres = self.venues["hl"].execute(act, {})
+            if not (vres.ok and (vres.raw or {}).get("resting")):
+                self.state.record_order(cycle_id, act.model_dump(), False, f"on-venue limit placement failed: {vres.detail[:100]}", {})
+                self.notify.send(f"REJECTED limit {act.coin}: on-venue placement failed ({vres.detail[:80]})", "warning")
+                return
+            entry["live_oid"] = vres.raw["oid"]
+        rest.append(entry)
         self.state.set("resting_orders", rest)
         self.state.record_order(cycle_id, act.model_dump(), True, reason + " | resting limit",
                                 {"ok": True, "detail": f"resting limit {act.side} {act.coin} @ {act.limit_price}", "resting": True})
@@ -532,6 +542,32 @@ class Agent:
             try:
                 a = Action.model_validate(r["action"])
                 px = mids.get(a.coin)
+                if r.get("live_oid"):                      # LIVE: the venue owns the order - query its real status
+                    status, fill_px = self.venues["hl"].order_status(a.coin, r["live_oid"])
+                    if status == "filled":
+                        _drop(r)
+                        att = self.venues["hl"].attach_triggers(a, fill_px or a.limit_price)
+                        self.state.record_order(cid, a.model_dump(), True, r["reason"] + " | limit filled on-venue",
+                                                {"ok": att.ok, "detail": f"filled @ ~{fill_px or a.limit_price}; {att.detail}",
+                                                 "raw": {"fill_px": fill_px or a.limit_price}})
+                        self.notify.send(f"FILLED limit {a.side} {a.coin} @ ~{fill_px or a.limit_price}; {att.detail[:80]}",
+                                         "info" if att.ok else "error")
+                        if att.ok:
+                            self.learner.record_open(self.trade_key(a), a, r.get("risk_usd") or 0.0, r.get("regime") or "",
+                                                     fill_px or a.limit_price, r.get("view") or "")
+                        continue
+                    if status == "canceled":
+                        _drop(r)
+                        self.state.record_order(cid, a.model_dump(), True, "on-venue limit canceled externally",
+                                                {"ok": False, "detail": "canceled on venue"})
+                        continue
+                    if time.time() - r["ts"] > ttl:
+                        _drop(r)
+                        self.venues["hl"].cancel_order(a.coin, r["live_oid"])
+                        self.state.record_order(cid, a.model_dump(), True, "limit expired unfilled - canceled",
+                                                {"ok": False, "detail": f"expired after {self.cfg.risk.limit_order_ttl_min}m unfilled"})
+                        self.notify.send(f"CANCELED limit {a.side} {a.coin} @ {a.limit_price}: TTL", "info")
+                    continue                                # 'open'/'unknown': keep waiting
                 if time.time() - r["ts"] > ttl:
                     _drop(r)
                     self.state.record_order(cid, a.model_dump(), True, "limit expired unfilled - canceled",
@@ -744,6 +780,7 @@ class Agent:
         for v in self.unique_venues:                      # let venues label PM positions with the real question / end time
             setattr(v, "pm_questions", self.md.pm_questions)
             setattr(v, "pm_meta", self.md.pm_meta)
+            setattr(v, "agent_state", self.state)         # live venues persist levels/cursors/oids in the journal
         regime = regime_tag(market)
 
         self._housekeep(prices)
@@ -1053,6 +1090,8 @@ class Agent:
         if cfg.is_live:
             banner += "\n*** LIVE MODE - REAL FUNDS ***"
         self.notify.send(banner, "warning" if cfg.is_live else "info")
+        if cfg.mode != "paper" and not self.state.get("live_since"):
+            self.state.set("live_since", time.time())      # era boundary: learning/calibration can split paper vs live
         if self.state.get("killed"):
             self.notify.send(f"Agent was previously killed: {self.state.get('killed')}. Delete data/KILL and clear 'killed' in journal to restart.", "error")
             sys.exit(2)

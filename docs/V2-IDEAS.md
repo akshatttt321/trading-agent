@@ -48,10 +48,12 @@ are hard requirements before switching `mode: live`.
 
 ## 4. Pre-live hardening (required before `mode: live`)
 
-- Polymarket live venue: stop/target monitoring, `pm_update`, settlement handling,
-  fill confirmation (paper venue has all of these; live venue does not yet).
-- Hyperliquid live: close-event reconciliation via the fills API (detect stops that executed
-  on-exchange while the agent was down).
+- ~~Polymarket live venue: stop/target monitoring, `pm_update`, settlement handling, fill confirmation~~ **BUILT 2026-08-30**
+  (agent-held levels executed by venue housekeeping; resolution detected and journaled, redemption manual; buys poll-confirm or cancel).
+- ~~Hyperliquid live: close-event reconciliation via the fills API~~ **BUILT 2026-08-30** (trigger oids tracked; user_fills cursor
+  turns on-exchange stop/TP executions into journal+learner events; own closes deduped).
+- ~~Live resting limit orders~~ **BUILT 2026-08-30** (Alo maker orders on-venue, tick monitors oid, triggers attach on fill,
+  TTL/replace cancel on-venue). NOTE: all three built code-complete but UNTESTED against a real venue - the testnet dry run is the gate.
 - Config re-tightening for live: `stance: conservative`, `skip_if_quiet: true`, min RR 1.5,
   Kelly 0.25, risk/trade 2.5 %.
 - Full dry run on Hyperliquid testnet.
