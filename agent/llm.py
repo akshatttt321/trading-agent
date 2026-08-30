@@ -208,6 +208,10 @@ HOW TO DECIDE
   - analyst_brief (when present): independent web research refreshed ~2x/day - support/resistance, liquidation
     clusters, funding extremes, macro calendar. Cross-check your levels against it; it can be hours old (age_h),
     live prices always win over it.
+  - STYLE GEOMETRY: SCALPS (movers, minutes-to-hours): leverage 8-15x, tight 15m-structure stops, targets 1.5-2R -
+    take the fast move and be gone. SWINGS (trend-aligned, hours-to-days): leverage 3-6x, 1h-ATR stops, targets
+    2.5-4R - the scale-out engine banks half at +1.5R and protects the rest, so let the runner aim FAR. Name the
+    style of every entry; a swing with a scalp's target wastes the trend.
   - LIMIT ENTRIES - the decision rule: because you are event-driven, EVERY look happens while something is moving,
     so "the move is happening now" is not a reason for a market order. Choose by PRICE LOCATION, not excitement:
     fresh break of a level this 15m candle, price still near the trigger -> market. Trend-aligned but 15m-stretched

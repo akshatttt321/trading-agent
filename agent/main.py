@@ -86,7 +86,7 @@ class Agent:
                                         "token_id": key if kind == "pm_sell" else None, "reason": why, "confidence": 1.0},
                                         True, "auto: " + why,
                                         {"ok": True, "detail": text, "raw": {"realized_pnl": float(pnl), "coin": key, "fill_px": prices.get(key)}})
-                if why == "STOP hit" and prices.get(key):
+                if why in ("STOP hit", "TAKE-PROFIT hit") and prices.get(key):
                     o = self.learner.open.get(key) or {}
                     side = o.get("side") or ((o.get("act") or {}).get("side"))
                     if side:
@@ -122,9 +122,10 @@ class Agent:
                 if w.get("tp_px"):
                     tp_hit = bool(min(lows) <= w["tp_px"]) if w["side"] == "short" else bool(max(highs) >= w["tp_px"])
                 q = self.state.get("exit_quality") or []
-                q.append({"coin": w["coin"], "side": w["side"], "exit_ts": w["exit_ts"], "mfe_pct": mfe_pct, "tp_hit": tp_hit})
+                q.append({"coin": w["coin"], "side": w["side"], "exit_ts": w["exit_ts"], "mfe_pct": mfe_pct, "tp_hit": tp_hit,
+                          "why": w.get("why", "STOP hit")})
                 self.state.set("exit_quality", q[-60:])
-                log.info(f"[dim]exit-quality {w['coin']} {w['side']}: {mfe_pct:+.2f}% max favorable move in the 4h AFTER the stop-out"
+                log.info(f"[dim]exit-quality {w['coin']} {w['side']} ({w.get('why', 'STOP hit')}): {mfe_pct:+.2f}% max favorable move in the 4h AFTER the exit"
                          + (f"; original TP would {'HAVE HIT' if tp_hit else 'NOT have hit'}" if tp_hit is not None else "") + "[/]")
             except Exception:
                 log.exception("exit scoring")
