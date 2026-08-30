@@ -838,8 +838,21 @@ class Agent:
             self.state.set("last_pm_ts", time.time())
             self.state.set("last_pm_prices_seen", {q.token_id: q.cur_price for q in snap.pm})
         log.info(f"[dim]showing {len(shown)}/{len(market.get('perps', {}))} coins: {', '.join(f'{c}({b[:3]})' for c, b in shown.items())}[/]")
+        vrows = self.state.db.execute(
+            "SELECT ts, action, risk_reason FROM orders WHERE approved=0 AND ts > ? ORDER BY ts DESC LIMIT 6",
+            (time.time() - 3 * 3600,)).fetchall()
+        recent_vetoes = []
+        for vts, va_, vwhy in vrows:
+            try:
+                vad = json.loads(va_)
+                if vad.get("kind") not in ("open_perp", "pm_buy", "spot_buy"):
+                    continue
+                recent_vetoes.append(f"{(time.time() - vts) / 60:.0f}m ago {vad.get('kind')} {vad.get('coin') or vad.get('outcome') or ''} "
+                                     f"{vad.get('side') or ''} -> {str(vwhy)[:120]}")
+            except Exception:
+                pass
         user_msg = build_user_message(self.cfg, snap, market_prompt, history, self.state.get("starting_equity"), self.state.get("start_ts"),
-                                      limits=self._limits_now(snap, market))
+                                      limits=self._limits_now(snap, market), vetoes=recent_vetoes)
 
         try:
             decision, raw = self.brain.propose(user_msg)

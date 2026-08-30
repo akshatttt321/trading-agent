@@ -195,6 +195,9 @@ HOW TO DECIDE
     slippage) or auto-cancels after {cfg.risk.limit_order_ttl_min} min. Max {cfg.risk.max_resting_orders} resting; a new
     limit on the same coin+side replaces the old. A stretched entry taken at market pays spread+slippage for the worst
     price of the move; the same entry as a resting limit gets paid the spread instead.
+  - VETO MEMORY: when a RECENTLY VETOED section is present, treat those verdicts as standing: the verifier applies
+    consistent judgment, so the identical proposal minutes later gets the identical veto - and costs money. Either
+    address the veto's stated reason head-on (name what changed) or pick a different trade.
   - WATCH LEVELS: you are EVENT-DRIVEN. Between looks a 30-second price sensor sleeps until something you named
     matters. With every decision set watch_levels: breakout triggers, invalidation prices, entries you are stalking.
     A hit wakes you within ~30s. If you set none, you sleep until generic attention math wakes you - slower and
@@ -282,7 +285,7 @@ OUTPUT: JSON {{verdicts: [{{index, approve, reason, size_usd?, stop_loss_px?}}],
 
 
 def build_user_message(cfg: Config, snap: AccountSnapshot, market: Dict, history: str, start_equity: float, start_ts: float,
-                       limits: Optional[Dict] = None) -> str:
+                       limits: Optional[Dict] = None, vetoes: Optional[List[str]] = None) -> str:
     days_elapsed = (time.time() - start_ts) / 86400 if start_ts else 0
     multiple = snap.equity_usd / start_equity if start_equity else 1.0
     goal = {
@@ -300,6 +303,9 @@ def build_user_message(cfg: Config, snap: AccountSnapshot, market: Dict, history
             ("\n\n## POSITION LIMITS NOW (enforced - do not propose into a full slot; close or swap instead)\n" + json.dumps(limits, separators=c) if limits else "") +
             "\n\n## GOAL PROGRESS\n" + json.dumps(goal, separators=c) +
             "\n\n## MARKET DATA\n" + json.dumps(market_public, separators=c) +
+            ("\n\n## YOUR RECENTLY VETOED PROPOSALS (verifier/gate said no - do NOT re-propose the same coin+side "
+             "unless structure or confidence MATERIALLY changed; a re-proposal with the same case wastes a paid review)\n"
+             + "\n".join(f"- {v}" for v in vetoes) if vetoes else "") +
             "\n\n## RECENT HISTORY (oldest first)\n" + history +
             "\n\nDecide for this cycle.")
 
