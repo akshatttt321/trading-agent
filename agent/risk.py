@@ -282,6 +282,14 @@ class RiskGate:
                 if waking < 1.5:
                     left = self.r.reentry_cooldown_min - (time.time() - blocks[bkey]) / 60
                     return Verdict(False, f"re-entry cooldown: {a.coin} {a.side} stopped out recently - {left:.0f}m left (a wake-up overrides)", a)
+            # resting-book capacity: checked HERE (free) so a full book never pays for a verifier review.
+            # A limit that cancel-replaces an existing same-coin+side order is exempt - it does not grow the book.
+            if a.order_type == "limit" and a.limit_price and self.r.max_resting_orders:
+                rest_b = self.state.get("resting_orders") or []
+                replaces = any((r.get("action") or {}).get("coin") == a.coin and (r.get("action") or {}).get("side") == a.side for r in rest_b)
+                if not replaces and len(rest_b) >= self.r.max_resting_orders:
+                    return Verdict(False, f"resting book full ({len(rest_b)}/{self.r.max_resting_orders}) - blocked free; "
+                                          f"replace an existing limit (same coin+side) or wait for a fill/expiry", a)
             # verifier-veto cooldown: the verifier's judgment stands - re-proposing the same coin+side minutes later
             # pays ~$0.01 for the same answer. Reject it here for FREE until the window passes.
             if self.r.veto_cooldown_min and a.kind == "open_perp":
