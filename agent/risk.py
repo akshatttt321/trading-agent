@@ -139,7 +139,21 @@ class RiskGate:
                     looser = (new_stop < cur_stop - eps) if is_long else (new_stop > cur_stop + eps)
                     tighter = (new_stop > cur_stop + eps) if is_long else (new_stop < cur_stop - eps)
                     if looser:
-                        return Verdict(False, f"would widen the stop {cur_stop}->{new_stop} - never loosen a stop", a)
+                        # WIDEN BUDGET: the manager may widen a stop at most TWICE over a position's life (user-granted) -
+                        # room for a structure re-read, never a way to ride a loser. Bounded by the entry-time max distance.
+                        widens = {k: v for k, v in (self.state.get("stop_widens") or {}).items()
+                                  if any(p_.coin == k for p_ in snap.perps)}          # prune closed positions
+                        used = int(widens.get(a.coin) or 0)
+                        if used >= 2:
+                            return Verdict(False, f"widen budget spent ({used}/2 for this trade) - the stop stays; "
+                                                  f"if the structure is broken, close the trade instead", a)
+                        new_dist_pct = abs(pos.mark_px - new_stop) / pos.mark_px * 100
+                        if new_dist_pct > self.r.max_stop_distance_pct:
+                            return Verdict(False, f"widened stop {new_dist_pct:.2f}% from mark exceeds max "
+                                                  f"{self.r.max_stop_distance_pct}% - widen less", a)
+                        widens[a.coin] = used + 1
+                        self.state.set("stop_widens", widens)
+                        return Verdict(True, f"stop widened {cur_stop}->{new_stop} (widen {used + 1}/2 for this trade)", a)
                     if not tighter:
                         return Verdict(True, "risk-reducing (stop unchanged / target adjust)", a)   # no-op on stop: allow
                 init_risk = abs(pos.entry_px - (pos.stop_px or pos.entry_px)) or (pos.entry_px * self.r.max_stop_distance_pct / 100)
@@ -360,7 +374,8 @@ class RiskGate:
                         (now_ts - spacing_min * 60,)).fetchall():
                     try:
                         oad = _json2.loads(oa); ord_ = _json2.loads(ores or "{}")
-                        if oad.get("kind") == "open_perp" and oad.get("side") == a.side and ord_.get("ok") and oad.get("coin") != a.coin:
+                        if (oad.get("kind") == "open_perp" and oad.get("side") == a.side and ord_.get("ok") and oad.get("coin") != a.coin
+                                and any(p_.coin == oad.get("coin") and (p_.size > 0) == (a.side == "long") for p_ in snap.perps)):
                             ago = (now_ts - ots) / 60
                             return Verdict(False, f"entry spacing: same-direction entry ({oad.get('coin')}) {ago:.0f}m ago and "
                                                   f"trend strength only {st_dir}/4 - min {spacing_min}m apart until the trend is proven (3+/4 = no spacing)", a)

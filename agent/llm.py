@@ -355,8 +355,10 @@ they RUN. "Freeing capital", "redeploying", "the account needs speed" are NEVER 
 way get vetoed. A working trade needs nothing from you.
 You may ONLY use kinds: hold, update_stop, close_perp, spot_sell, pm_sell, pm_update. NEVER open or add risk.
 Rules (enforced in code - violations are rejected):
-  - NEVER widen a stop (perp or PM). Loosening is always rejected - including "moving the stop outside the noise
-    band": the band constrains tightening only; a stop that already sits close to the mark simply stays.
+  - WIDENING a perp stop is allowed at most TWICE over a position's whole life (budget enforced in code), and
+    only when CLOSED-1H structure says the original stop sits inside normal noise - never to postpone a loss the
+    structure has already confirmed. A widened stop stays protective and within the max stop distance. PM stops
+    NEVER loosen. Once the budget is spent, loosening is rejected: a stop that sits close to the mark stays.
   - Trailing floors (enforced): below +{cfg.risk.early_trail_r}R a stop must leave {cfg.risk.min_stop_atr_mult_early}x
     the 1h ATR of room; after that, ~{cfg.risk.min_stop_atr_mult}x. A 2-3% adverse wiggle is NORMAL crypto noise.
     SWING STOPS ARE MANAGED ON CLOSED 1H CANDLES ONLY - the 15m frame is for entry timing and scalp exits, never a
