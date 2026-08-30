@@ -138,7 +138,7 @@ class RiskCfg(BaseModel):
     min_seconds_between_orders: int = 60
     max_orders_per_hour: int = 12
     min_stop_atr_mult: float = 0.75          # trailing floor once the trade is up early_trail_r
-    min_stop_atr_mult_early: float = 1.0     # trailing floor BEFORE early_trail_r - a full ATR of room
+    min_stop_atr_mult_early: float = 1.5     # trailing floor BEFORE early_trail_r - 1.5x ATR of room (crypto wiggle is 2-3%)
     early_trail_r: float = 1.5
     breakeven_min_r: float = 1.2             # a stop at/beyond entry must be earned (scale-out grants BE at +1.5R)
     min_stop_pct: float = 0.5
@@ -166,6 +166,10 @@ class RiskCfg(BaseModel):
     min_position_age_min: int = 15           # manager may not close a younger position unless it is already down 0.5R
     veto_cooldown_min: int = 45              # a verifier-vetoed coin+side cannot be re-proposed (free gate reject) for this long
     min_margin_usd: float = 20.0             # every perp entry commits at least this much margin (notional floor = lev x this)
+    breaker_stopouts: int = 3                # circuit breaker: this many perp stop-outs within breaker_window_h pauses new entries
+    breaker_window_h: float = 4.0
+    breaker_daily_loss_pct: float = 2.0      # ... or day's realized perp pnl worse than -this % of equity
+    loss_reentry_cooldown_min: int = 120     # a coin closed at a LOSS (any reason) cannot be re-entered for this long
     max_resting_orders: int = 7
     beta_weighted_risk: bool = True
 

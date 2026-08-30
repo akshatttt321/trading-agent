@@ -243,8 +243,9 @@ HOW TO DECIDE
     uptrend, wait for the 15m dip-and-turn rather than buying a stretched 15m candle. vol_burst_15m > 2 = the move is
     happening NOW. A 15m-only signal against the 1h trend is a scalp: allowed on movers, but say so and use a tighter
     target. Use atr14_15m_pct to place stops on movers - the 1h ATR is too coarse for a 5-minute-cycle coin.
-  - TRAILING: below +{cfg.risk.early_trail_r}R, stops tighter than 1x the coin's 1h ATR (or 0.5%) from the mark are
-    rejected; after +{cfg.risk.early_trail_r}R the floor relaxes to ~{cfg.risk.min_stop_atr_mult}x ATR. A stop at/beyond
+  - TRAILING: below +{cfg.risk.early_trail_r}R, stops tighter than {cfg.risk.min_stop_atr_mult_early}x the coin's 1h ATR
+    from the mark are rejected; after +{cfg.risk.early_trail_r}R the floor relaxes to ~{cfg.risk.min_stop_atr_mult}x ATR.
+    Swing stops move on CLOSED 1H structure only; a 2-3% wiggle is normal crypto noise, not a signal. A stop at/beyond
     entry (locking breakeven) is rejected below +{cfg.risk.breakeven_min_r}R - the scale-out engine grants BE automatically
     at +1.5R. Trail on structure (new swing high/low on the 15m), in ATR steps, not every cycle.
     The noise band constrains TIGHTENING ONLY. A stop that already sits close to the mark stays where it is - NEVER
@@ -351,9 +352,10 @@ You may ONLY use kinds: hold, update_stop, close_perp, spot_sell, pm_sell, pm_up
 Rules (enforced in code - violations are rejected):
   - NEVER widen a stop (perp or PM). Loosening is always rejected - including "moving the stop outside the noise
     band": the band constrains tightening only; a stop that already sits close to the mark simply stays.
-  - Trailing floors (enforced): below +{cfg.risk.early_trail_r}R a stop must leave a FULL 1h ATR of room; after that,
-    ~{cfg.risk.min_stop_atr_mult}x ATR. Inside those bands you stop yourself out on ordinary noise. Trail scalps in
-    atr14_15m_pct steps, swings in 1h-ATR steps.
+  - Trailing floors (enforced): below +{cfg.risk.early_trail_r}R a stop must leave {cfg.risk.min_stop_atr_mult_early}x
+    the 1h ATR of room; after that, ~{cfg.risk.min_stop_atr_mult}x. A 2-3% adverse wiggle is NORMAL crypto noise.
+    SWING STOPS ARE MANAGED ON CLOSED 1H CANDLES ONLY - the 15m frame is for entry timing and scalp exits, never a
+    reason to tighten a swing stop. Trail swings on new 1h swing points, scalps on 15m structure.
   - A close that REALISES A LOSS is reviewed by a verifier - state the thesis-break reason honestly.
   - update_stop: stop_loss_px and/or take_profit_px on the named coin. pm_update: TOKEN-price stop/target on token_id.
 Judgement guide: breakeven is EARNED, not grabbed - a stop at/beyond entry is rejected below +{cfg.risk.breakeven_min_r}R

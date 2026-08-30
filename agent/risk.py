@@ -290,6 +290,62 @@ class RiskGate:
                 if not replaces and len(rest_b) >= self.r.max_resting_orders:
                     return Verdict(False, f"resting book full ({len(rest_b)}/{self.r.max_resting_orders}) - blocked free; "
                                           f"replace an existing limit (same coin+side) or wait for a fill/expiry", a)
+            # LOSS CIRCUIT BREAKER: repeated stop-outs or a bleeding day mean the regime is misread -
+            # pause NEW entries (managing/stops unaffected). In a real trend this never fires.
+            import json as _json2
+            now_ts = cycle_start_ts
+            if self.r.breaker_stopouts:
+                stops4h = 0
+                day0 = now_ts - (now_ts % 86400)
+                day_pnl = 0.0
+                for ots, oa, orr, ores in self.state.db.execute(
+                        "SELECT ts, action, risk_reason, result FROM orders WHERE approved=1 AND ts > ?",
+                        (min(now_ts - self.r.breaker_window_h * 3600, day0),)).fetchall():
+                    try:
+                        oad = _json2.loads(oa); ord_ = _json2.loads(ores or "{}"); raw_ = ord_.get("raw") or {}
+                        if oad.get("kind") != "close_perp" or "realized_pnl" not in raw_:
+                            continue
+                        if ots >= day0:
+                            day_pnl += float(raw_["realized_pnl"])
+                        if ots > now_ts - self.r.breaker_window_h * 3600 and str(orr or "").startswith("auto: STOP"):
+                            stops4h += 1
+                    except Exception:
+                        continue
+                if stops4h >= self.r.breaker_stopouts:
+                    return Verdict(False, f"CIRCUIT BREAKER: {stops4h} perp stop-outs in {self.r.breaker_window_h:.0f}h - "
+                                          f"the regime is disagreeing; new entries paused (managing continues)", a)
+                if day_pnl <= -snap.equity_usd * self.r.breaker_daily_loss_pct / 100:
+                    return Verdict(False, f"CIRCUIT BREAKER: day's realized perp pnl ${day_pnl:.2f} beyond "
+                                          f"-{self.r.breaker_daily_loss_pct}% of equity - new entries paused", a)
+            # LOSS RE-ENTRY COOLDOWN: a coin that just lost money (ANY exit reason) needs fresh structure, not a rematch.
+            if self.r.loss_reentry_cooldown_min:
+                for ots, oa, ores in self.state.db.execute(
+                        "SELECT ts, action, result FROM orders WHERE approved=1 AND ts > ? ORDER BY ts DESC",
+                        (now_ts - self.r.loss_reentry_cooldown_min * 60,)).fetchall():
+                    try:
+                        oad = _json2.loads(oa); raw_ = (_json2.loads(ores or "{}").get("raw") or {})
+                        if oad.get("coin") == a.coin and float(raw_.get("realized_pnl", 0)) < 0 and "realized_pnl" in raw_:
+                            ago = (now_ts - ots) / 60
+                            return Verdict(False, f"loss re-entry cooldown: {a.coin} closed at a loss {ago:.0f}m ago - "
+                                                  f"blocked {self.r.loss_reentry_cooldown_min}m (any exit reason counts)", a)
+                    except Exception:
+                        continue
+            # TREND-CONDITIONAL ENTRY SPACING: unproven direction -> same-direction entries cannot stack in one
+            # dip window; a CONFIRMED trend (strength >= 3/4) stacks freely - ride the bull, don't guess at it.
+            st_dir, _why_st = trend_strength(market, a.side)
+            spacing_min = 45 if st_dir <= 1 else (20 if st_dir == 2 else 0)
+            if spacing_min:
+                for ots, oa, ores in self.state.db.execute(
+                        "SELECT ts, action, result FROM orders WHERE approved=1 AND ts > ? ORDER BY ts DESC",
+                        (now_ts - spacing_min * 60,)).fetchall():
+                    try:
+                        oad = _json2.loads(oa); ord_ = _json2.loads(ores or "{}")
+                        if oad.get("kind") == "open_perp" and oad.get("side") == a.side and ord_.get("ok") and oad.get("coin") != a.coin:
+                            ago = (now_ts - ots) / 60
+                            return Verdict(False, f"entry spacing: same-direction entry ({oad.get('coin')}) {ago:.0f}m ago and "
+                                                  f"trend strength only {st_dir}/4 - min {spacing_min}m apart until the trend is proven (3+/4 = no spacing)", a)
+                    except Exception:
+                        continue
             # verifier-veto cooldown: the verifier's judgment stands - re-proposing the same coin+side minutes later
             # pays ~$0.01 for the same answer. Reject it here for FREE until the window passes.
             if self.r.veto_cooldown_min and a.kind == "open_perp":
