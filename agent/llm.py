@@ -75,6 +75,24 @@ VERDICT_SCHEMA = {
 
 RISK_ADDING = {"open_perp", "spot_buy", "pm_buy"}
 EXITS = {"close_perp", "pm_sell", "spot_sell"}
+VERIFY_RULES = (
+    "Every action below has ALREADY PASSED the coded rule checks (stop distance, R:R, leverage, margin, "
+    "position caps). The [metrics(code-verified)] block inside each reason is authoritative arithmetic - "
+    "NEVER claim a numeric rule violation; if your mental math disagrees with the metrics block, the "
+    "metrics block is right. Veto only on JUDGMENT: regime fit, correlation/concentration, thesis "
+    "quality, entry timing. "
+    "BREADTH CALIBRATION: mixed breadth is NOT a veto reason - in a mixed regime (neither direction holding a "
+    "strong ~65%+ majority) judge the COIN'S OWN structure; a clean aligned setup with a stated reason stands on "
+    "its own. A breadth veto requires the trade to FIGHT A STRONG MAJORITY without a stated specific reason. "
+    "For LOSS-REALISING EXITS specifically: closing a position under ~1h old, or justified by the "
+    "live candle, or by momentum-in-the-trade's-favor readings ('oversold' on a short / 'overbought' "
+    "on a long), is CHURN - veto it unless the reason names a closed-candle structure break. "
+    "CORRELATION IS SYMMETRIC: three correlated LONGS plus a fourth is the same concentration trap "
+    "as four correlated shorts - apply the same veto standard to long baskets. "
+    "SCALE-INS: adding to a WINNING position is legitimate - approve it when the combined position "
+    "stays protected (stop at/beyond the original entry) AND stated confidence is >= 0.80; below "
+    "0.80 confidence, veto the add. Adding to a LOSING position is never acceptable.\n")
+
 MANAGE_KINDS = {"hold", "close_perp", "update_stop", "spot_sell", "pm_sell", "pm_update"}
 _MANAGE_ACTION = json.loads(json.dumps(ACTION_SCHEMA))          # deep copy
 _MANAGE_ACTION["properties"]["kind"]["enum"] = sorted(MANAGE_KINDS)
@@ -445,7 +463,8 @@ class Brain:
         """Cheapest available model - used for post-mortems."""
         return self.fallbacks[-1] if self.fallbacks else self.proposer
 
-    def _verify(self, user_msg: str, decision: Decision, held_same_side: set = frozenset()) -> Tuple[Decision, List[Tuple[Action, str]], Usage]:
+    def _verify(self, user_msg: str, decision: Decision, held_same_side: set = frozenset(),
+                veto_outcomes: Optional[List[str]] = None) -> Tuple[Decision, List[Tuple[Action, str]], Usage]:
         """Returns (filtered decision, [(rejected_action, reason)], usage).
         Adds to an already-held same-direction position (thesis already approved once) skip the verifier."""
         idx = [i for i, a in enumerate(decision.actions)
@@ -454,20 +473,13 @@ class Brain:
             return decision, [], Usage()
         proposal = {"market_view": decision.market_view,
                     "actions": [{"index": i, **decision.actions[i].model_dump(exclude_none=True)} for i in idx]}
-        msg = user_msg + ("\n\n## PROPOSED ACTIONS TO REVIEW\n"
-                          "Every action below has ALREADY PASSED the coded rule checks (stop distance, R:R, leverage, margin, "
-                          "position caps). The [metrics(code-verified)] block inside each reason is authoritative arithmetic - "
-                          "NEVER claim a numeric rule violation; if your mental math disagrees with the metrics block, the "
-                          "metrics block is right. Veto only on JUDGMENT: regime fit, correlation/concentration, thesis "
-                          "quality, entry timing. "
-                          "For LOSS-REALISING EXITS specifically: closing a position under ~1h old, or justified by the "
-                          "live candle, or by momentum-in-the-trade's-favor readings ('oversold' on a short / 'overbought' "
-                          "on a long), is CHURN - veto it unless the reason names a closed-candle structure break. "
-                          "CORRELATION IS SYMMETRIC: three correlated LONGS plus a fourth is the same concentration trap "
-                          "as four correlated shorts - apply the same veto standard to long baskets. "
-                          "SCALE-INS: adding to a WINNING position is legitimate - approve it when the combined position "
-                          "stays protected (stop at/beyond the original entry) AND stated confidence is >= 0.80; below "
-                          "0.80 confidence, veto the add. Adding to a LOSING position is never acceptable.\n" + json.dumps(proposal, separators=(",", ":")))
+        acc = ""
+        if veto_outcomes:
+            acc = ("## YOUR RECENT VETO OUTCOMES (simulated after each veto). These grade YOUR past judgment. "
+                   "A veto marked MISTAKE means you blocked a winner - it is evidence to APPROVE comparable setups, "
+                   "NEVER precedent to veto them again. Do not cite this section as a reason to veto.\n"
+                   + "\n".join(f"- {o}" for o in veto_outcomes) + "\n")
+        msg = user_msg + "\n\n## PROPOSED ACTIONS TO REVIEW\n" + VERIFY_RULES + acc + json.dumps(proposal, separators=(",", ":"))
         c = self._call(self.verifier, self.verifier_system, msg, VERDICT_SCHEMA, "submit_verdicts")
         self.last_verify_failed = bool(c.error or not c.data)
         if c.error or not c.data:
@@ -539,12 +551,13 @@ class Brain:
         self.last_usage = usage.as_dict()
         return Decision(market_view="(manager failed)", actions=[]), "{}"
 
-    def verify(self, user_msg: str, actions: List[Action], market_view: str, held_same_side: set = frozenset()) -> Tuple[List[Tuple[int, Action]], List[Tuple[int, Action, str]]]:
+    def verify(self, user_msg: str, actions: List[Action], market_view: str, held_same_side: set = frozenset(),
+               veto_outcomes: Optional[List[str]] = None) -> Tuple[List[Tuple[int, Action]], List[Tuple[int, Action, str]]]:
         """Step 2: verifier on gate-approved actions. Index-keyed results so callers never rely on object identity
         (approved actions may be model_copy()'d): returns (approved [(idx, act)], vetoed [(idx, act, reason)])."""
         if not actions:
             return [], []
-        d, rejected, vusage = self._verify(user_msg, Decision(market_view=market_view, actions=list(actions)), held_same_side)
+        d, rejected, vusage = self._verify(user_msg, Decision(market_view=market_view, actions=list(actions)), held_same_side, veto_outcomes)
         self._usage.add(vusage)
         self.last_usage = self._usage.as_dict()
         rej_reason = {id(a): why for a, why in rejected}

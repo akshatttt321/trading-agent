@@ -985,7 +985,10 @@ class Agent:
         held = {(p.coin, "long" if p.size > 0 else "short") for p in snap.perps}
         to_verify = [act for act, _ in pending] + [act for act, _ in loss_exits]
         n_pending = len(pending)
-        approved_ix, vetoed_ix = self.brain.verify(user_msg, to_verify, decision.market_view, held) if to_verify else ([], [])
+        vouts = [(f"{t.get('coin')} {t.get('side')}: you vetoed it and it then {'hit its target' if t.get('status') == 'target' else t.get('status')} "
+                  f"(R={t.get('r'):+.2f}) -> that veto was {'a MISTAKE - approve comparable setups' if (t.get('r') or 0) > 0 else 'CORRECT'}")
+                 for t in (self.learner.shadows or []) if t.get("by") == "verifier" and t.get("status") != "open" and t.get("r") is not None][-5:]
+        approved_ix, vetoed_ix = self.brain.verify(user_msg, to_verify, decision.market_view, held, veto_outcomes=vouts) if to_verify else ([], [])
         if loss_exits and self.brain.last_verify_failed:           # fail-open: never trap a losing position behind an outage
             done = {i for i, _ in approved_ix}
             approved_ix = list(approved_ix) + [(n_pending + k, act) for k, (act, _) in enumerate(loss_exits) if n_pending + k not in done]
