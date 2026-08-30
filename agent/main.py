@@ -961,16 +961,45 @@ class Agent:
                     _reject(a, verdict.reason, "risk_gate")
                     continue
                 va = verdict.action
-                if va.kind == "open_perp" and va.stop_loss_px:      # code-verified arithmetic for the verifier (it must not do math)
-                    ref = va.limit_price if (va.order_type == "limit" and va.limit_price) else prices.get(va.coin)
-                    if ref:
-                        sd = abs(ref - va.stop_loss_px) / ref * 100
-                        rr_v = abs((va.take_profit_px or ref) - ref) / abs(ref - va.stop_loss_px) if ref != va.stop_loss_px else 0.0
-                        longs = sum(1 for pp in snap.perps if pp.size > 0)
-                        shorts = sum(1 for pp in snap.perps if pp.size < 0)
-                        va.reason = (va.reason or "") + (f" [metrics(code-verified): stop {sd:.1f}% of entry (max {self.cfg.risk.max_stop_distance_pct}), "
-                                                         f"RR {rr_v:.2f} (min {self.cfg.rr.min_reward_risk}), book {longs}L/{shorts}S]")
-                pending.append((va, verdict.reason))
+                # ---- ALL deterministic finishers run BEFORE the paid review: a trade that any free check would
+                # kill never costs a verifier call, and the verifier reviews the FINAL, fully-sized action. ----
+                entry_ref = va.limit_price if (va.kind == "open_perp" and va.order_type == "limit" and va.limit_price) \
+                    else (prices.get(va.coin) if va.coin else None)
+                if va.kind == "open_perp":
+                    ok_s, why_s = self.risk.validate_stop_vs_entry(va, entry_ref)
+                    if not ok_s:
+                        _reject(va, why_s, "risk_gate")
+                        continue
+                if va.kind == "pm_buy":
+                    from .market_data import parse_price_market
+                    meta = self.md.pm_meta.get(str(va.market_id), {})
+                    pmc = self.cfg.universe.prediction_markets
+                    edge = (va.confidence or 0) - (va.limit_price or 0)
+                    is_swing = va.stop_loss_px is not None and va.take_profit_px is not None
+                    if meta and not is_swing and not parse_price_market(meta.get("question", "")) and edge > pmc.max_research_edge:
+                        v = self.researcher.verify(meta, va.confidence, va.outcome or "Yes")
+                        if v and v.get("agree") and v.get("verified_outcome") and (v["prob_yes"] - (va.limit_price or 0)) > pmc.max_research_edge and v.get("confidence", 0) >= 0.7:
+                            va = va.model_copy()
+                            va.confidence = round((va.limit_price or 0) + pmc.max_research_edge, 3)
+                            self.notify.send(f"EDGE VERIFIED {va.outcome}: 2nd search confirms - taking, sized on capped edge", "warning")
+                        else:
+                            vs = (v or {}).get("summary", "no result")
+                            _reject(va, f"implausible edge {edge:+.2f} NOT confirmed on re-check: {vs[:70]}", "rr_model")
+                            continue
+                mult = self.learner.size_multiplier(va, regime) * self._throttle_mult()
+                rrv = self.rr.assess(va, snap, entry_ref, mult, self.md.pm_meta, {c2: v2.get("mark") for c2, v2 in market.get("perps", {}).items()})
+                if not rrv.ok:
+                    _reject(va, f"{verdict.reason} | rr: {rrv.reason}", "rr_model")
+                    continue
+                va = rrv.action                                    # FINAL sized action - this is what the verifier reviews
+                if va.kind == "open_perp" and va.stop_loss_px and entry_ref:
+                    sd = abs(entry_ref - va.stop_loss_px) / entry_ref * 100
+                    rr_v = abs((va.take_profit_px or entry_ref) - entry_ref) / abs(entry_ref - va.stop_loss_px) if entry_ref != va.stop_loss_px else 0.0
+                    longs = sum(1 for pp in snap.perps if pp.size > 0)
+                    shorts = sum(1 for pp in snap.perps if pp.size < 0)
+                    va.reason = (va.reason or "") + (f" [metrics(code-verified): stop {sd:.1f}% of entry (max {self.cfg.risk.max_stop_distance_pct}), "
+                                                     f"RR {rr_v:.2f} (min {self.cfg.rr.min_reward_risk}), book {longs}L/{shorts}S]")
+                pending.append((va, f"{verdict.reason} | rr: {rrv.reason}", rrv.risk_usd))
                 continue
             # risk-reducing actions (close / tighten stop / sell) execute immediately - rotations close first.
             # Exception: exits that REALISE A LOSS are a judgement call -> reviewed by the verifier (fail-open).
@@ -985,7 +1014,7 @@ class Agent:
         # verifier only sees what the gate let through (adds to a held same-side position skip it).
         # INDEX-keyed end to end: indices < n_pending are entries, >= n_pending are loss exits.
         held = {(p.coin, "long" if p.size > 0 else "short") for p in snap.perps}
-        to_verify = [act for act, _ in pending] + [act for act, _ in loss_exits]
+        to_verify = [p_[0] for p_ in pending] + [act for act, _ in loss_exits]
         n_pending = len(pending)
         vouts = [(f"{t.get('coin')} {t.get('side')}: you vetoed it and it then {'hit its target' if t.get('status') == 'target' else t.get('status')} "
                   f"(R={t.get('r'):+.2f}) -> that veto was {'a MISTAKE - approve comparable setups' if (t.get('r') or 0) > 0 else 'CORRECT'}")
@@ -1002,50 +1031,18 @@ class Agent:
             if i >= n_pending:                                     # verifier-approved loss exit: execute as an exit now
                 _execute(act, loss_exits[i - n_pending][1] + " | verifier approved loss exit", 0.0)
             else:
-                approved.append(act)
+                approved.append((i, act))
         for i, a, why in vetoed_ix:
             vetoed.append((a, f"{why} (loss exit vetoed - position kept)") if i >= n_pending else (a, why))
-        reasons = {id(act): why for act, why in pending}
         for a, why in vetoed:
             _reject(a, why, "verifier")
-        for act in approved:
-            snap = self.snapshot(prices)                                   # re-check caps after earlier fills this cycle
+        for i, act in approved:
+            snap = self.snapshot(prices)                           # re-check caps only: earlier fills this cycle may have consumed room
             recheck = self.risk.evaluate(act, snap, cycle_start_ts, funding, regime, market)
             if not recheck.approved:
                 _reject(act, recheck.reason, "risk_gate")
                 continue
-            act = recheck.action
-            reason = recheck.reason
-            entry_ref = act.limit_price if (act.kind == "open_perp" and act.order_type == "limit" and act.limit_price) \
-                else (prices.get(act.coin) if act.coin else None)
-            if act.kind == "open_perp":
-                ok, why = self.risk.validate_stop_vs_entry(act, entry_ref)
-                if not ok:
-                    _reject(act, why, "risk_gate")
-                    continue
-            # event PM with an implausibly large research edge: don't reject outright - re-verify the facts first
-            if act.kind == "pm_buy":
-                from .market_data import parse_price_market
-                meta = self.md.pm_meta.get(str(act.market_id), {})
-                pmc = self.cfg.universe.prediction_markets
-                edge = (act.confidence or 0) - (act.limit_price or 0)
-                is_swing = act.stop_loss_px is not None and act.take_profit_px is not None
-                if meta and not is_swing and not parse_price_market(meta.get("question", "")) and edge > pmc.max_research_edge:
-                    v = self.researcher.verify(meta, act.confidence, act.outcome or "Yes")
-                    if v and v.get("agree") and v.get("verified_outcome") and (v["prob_yes"] - (act.limit_price or 0)) > pmc.max_research_edge and v.get("confidence", 0) >= 0.7:
-                        # confirmed by a second skeptical search -> take it, but size conservatively (cap the edge used)
-                        act = act.model_copy(); act.confidence = round((act.limit_price or 0) + pmc.max_research_edge, 3)
-                        self.notify.send(f"EDGE VERIFIED {act.outcome}: 2nd search confirms outcome+prob ({v['summary'][:60]}) - taking, sized on capped edge", "warning")
-                    else:
-                        vs = (v or {}).get("summary", "no result")
-                        _reject(act, f"implausible edge {edge:+.2f} NOT confirmed on re-check (outcome/price unverified): {vs[:70]}", "rr_model")
-                        continue
-            mult = self.learner.size_multiplier(act, regime) * self._throttle_mult()
-            rrv = self.rr.assess(act, snap, entry_ref, mult, self.md.pm_meta, {c: v.get("mark") for c, v in market.get("perps", {}).items()})
-            if not rrv.ok:
-                _reject(act, f"{reason} | rr: {rrv.reason}", "rr_model")
-                continue
-            _execute(rrv.action, f"{reason} | rr: {rrv.reason}", rrv.risk_usd)
+            _execute(recheck.action, pending[i][1], pending[i][2])
 
         self._account_tokens()
         if not pm_scope:                                      # a PM review says nothing about perp-market quietness
