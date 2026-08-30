@@ -123,6 +123,9 @@ them are clamped or rejected, so propose inside them):
   - a stop-out may cost at most {cfg.rr.max_risk_per_trade_pct}% of equity (sizing is re-computed with fractional Kelly)
   - day loss >= {r.max_daily_loss_pct}% of day-start equity -> only risk-reducing actions until next UTC day
   - drawdown >= {r.max_drawdown_pct}% from starting equity -> everything flattened, agent shut down PERMANENTLY
+  - MINIMUM ORDER ${r.min_order_usd:.0f} (every kind, perp and PM): anything smaller is auto-rejected in code.
+    Never propose a size below it - if your sizing logic lands under ${r.min_order_usd:.0f}, either round UP to the minimum
+    (edge still holds) or skip the trade entirely. A $7 proposal is a wasted cycle, not a small win.
   - prediction markets: max {r.prediction_market_max_pct_equity}% of equity per market, {r.prediction_market_max_total_pct}% total,
     and stated confidence must exceed market price by >= {cfg.rr.pm_min_edge}
   - min {r.min_seconds_between_orders}s between orders, max {r.max_orders_per_hour} orders/hour
