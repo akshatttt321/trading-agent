@@ -409,6 +409,16 @@
     }
   }
 
+  // One open shadow trade: mark follows the live (drifting) price, live_r = signed distance from entry in stop-units.
+  function shadowOpen(coin, side, entry, stop, tp, sizeUsd, by, reason, ts) {
+    const mark = round(markFor(coin), 4);
+    const move = side === 'short' ? entry - mark : mark - entry;
+    return {
+      coin, side, entry_px: entry, mark_px: mark, live_r: round(move / Math.abs(entry - stop), 2),
+      stop_px: stop, tp_px: tp, size_usd: sizeUsd, by, reason, ts: round(ts, 1),
+    };
+  }
+
   function status() {
     const snap = snapshot();
     const t = now();
@@ -457,6 +467,24 @@
         { coin: 'SUI', side: 'short', size_usd: 25, limit_price: 0.725, stop_loss_px: 0.762, take_profit_px: 0.648, ts: round(t - 3300, 1) },
         { coin: 'LINK', side: 'long', size_usd: 40, limit_price: 13.62, stop_loss_px: 13.05, take_profit_px: 15.1, ts: round(t - 9800, 1) },
       ],
+      // Rejected entries, paper-simulated to score the rejecter (status.shadow_trades).
+      // live_r follows the drifting mark so the demo shows it updating; sign = the REJECTED trade's PoV.
+      shadow_trades: killed ? { open: [], resolved: [] } : {
+        open: [
+          shadowOpen('DOGE', 'long', 0.1390, 0.1330, 0.1530, 45, 'verifier',
+            'Verifier: breakout not confirmed - OI flat and funding already elevated; chasing here risks a fakeout above range highs.', t - 4700),
+          shadowOpen('LINK', 'long', 15.6, 14.9, 17.2, 60, 'risk_gate',
+            'Risk gate: max_open_positions (4) reached and stop distance 4.5% leaves too little room after the cooldown window.', t - 12400),
+          shadowOpen('SUI', 'short', 1.94, 2.02, 1.72, 30, 'rr_model',
+            'RR model: reward:risk 1.3 below the 1.5 minimum at the proposed stop; edge too thin after fees.', t - 26900),
+        ],
+        resolved: [
+          { coin: 'PENGU', side: 'short', entry_px: 0.0312, stop_px: 0.0331, tp_px: 0.0268, by: 'verifier', status: 'stopped', r: -1.0, ts: round(t - 31000, 1) },
+          { coin: 'AVAX', side: 'long', entry_px: 23.4, stop_px: 22.6, tp_px: 25.1, by: 'risk_gate', status: 'target', r: 2.1, ts: round(t - 52000, 1) },
+          { coin: 'ARB', side: 'short', entry_px: 0.744, stop_px: 0.771, tp_px: 0.688, by: 'rr_model', status: 'expired', r: 0.4, ts: round(t - 76000, 1) },
+          { coin: 'HYPE', side: 'long', entry_px: 28.9, stop_px: 27.6, tp_px: 32.2, by: 'verifier', status: 'stopped', r: -1.0, ts: round(t - 103000, 1) },
+        ],
+      },
       // Today's prediction-market research spend (You.com calls).
       research_today: { day: new Date(t * 1000).toISOString().slice(0, 10), usd: 0.012 },
       snapshot: snap,

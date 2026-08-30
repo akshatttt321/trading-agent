@@ -939,3 +939,21 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 
 /* ---- exit quality mini-table (status.exit_quality — stop-out counterfactuals) ---- */
 .xq-caption { margin: -2px 0 8px; }
+
+/* ---- shadow trades panel (status.shadow_trades - rejected entries, paper-simulated) ---- */
+/* Hypothetical, so it reads ghosted: dashed panel border, muted header, slightly desaturated/faded rows. */
+.shadow-panel { border-style: dashed; }
+.shadow-panel:hover { border-style: dashed; }
+.shadow-panel .panel-head h2 { color: var(--text-2); }
+.ghost-ico { font-size: 15px; margin-right: 2px; filter: grayscale(0.4); opacity: 0.9; }
+.ghost-tbl tbody tr td { opacity: 0.82; }
+.ghost-tbl tbody tr:hover td { opacity: 1; }
+.ghost-tbl tr.ghost-row td { background-image: repeating-linear-gradient(135deg, transparent 0 10px, rgba(128,128,128,0.05) 10px 20px); }
+.ghost-tbl .rbar, .ghost-tbl .side-pill { filter: saturate(0.75); }
+.shadow-resolved { margin-top: 10px; }
+.ghost-pill { border-style: dashed; opacity: 0.92; }
+.ghost-pill.right { border-color: rgba(34,177,76,0.45); }
+.ghost-pill.wrong { border-color: rgba(224,75,75,0.45); }
+.ghost-pill .ghost-verdict { color: var(--text-3); }
+.ghost-pill.right .ghost-verdict { color: var(--good); }
+.ghost-pill.wrong .ghost-verdict { color: var(--bad); }

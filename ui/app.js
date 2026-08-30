@@ -885,6 +885,55 @@
     </div>`;
   }
 
+
+  // -------------------------------------------------------------- render: shadow trades (status.shadow_trades)
+  // Rejected entries (verifier / risk gate / RR model) that the agent paper-simulates to score the rejecter.
+  // live_r / r read from the REJECTED trade's point of view: positive = it would be winning, i.e. the veto is
+  // costing money (bad for the rejecter); negative = the veto saved money.
+  function renderShadowTrades() {
+    const st = (state.status && state.status.shadow_trades) || {};
+    const open = Array.isArray(st.open) ? st.open.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
+    const resolved = Array.isArray(st.resolved) ? st.resolved.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
+    const panel = $id('shadowtr-panel');
+    panel.hidden = !open.length && !resolved.length;
+    if (panel.hidden) return;
+    const nowS = Date.now() / 1000;
+
+    $id('shadowtr-open-block').hidden = !open.length;
+    $id('shadowtr-open-table').querySelector('tbody').innerHTML = open.length ? open.map((t) => {
+      const side = String(t.side || '').toLowerCase() === 'short' ? 'short' : 'long';
+      const who = rejecterOf(t);
+      // Reuse the positions' stop->TP track when we have mark+entry; else a compact text fallback.
+      const bar = t.mark_px != null && t.entry_px != null
+        ? rangeBar({ stop_px: t.stop_px, tp_px: t.tp_px, mark_px: t.mark_px, entry_px: t.entry_px, unrealized_pnl: t.live_r }, side)
+        : `<span class="small"><span class="neg">stop ${fmtPx(t.stop_px)}</span> <span class="arrow">\u2192</span> <span class="pos">tp ${fmtPx(t.tp_px)}</span></span>`;
+      return `<tr class="ghost-row" title="${esc(t.reason || '')}">
+        <td data-l="Coin"><div class="coin">${esc(t.coin || '\u2014')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${t.size_usd != null ? ` <span class="muted">${fmtUSD(t.size_usd)}</span>` : ''}</div></td>
+        <td data-l="Rejected by"><span class="by-pill ${esc(who)}" title="rejected by ${esc(who === 'other' ? 'unknown' : (REJECTERS.find((r) => r[0] === who) || [])[2] || who)}">${esc(BY_SHORT[who] || (t.by ? String(t.by) : '?'))}</span></td>
+        <td class="r" data-l="Entry">${fmtPx(t.entry_px)}</td>
+        <td class="r" data-l="Mark">${fmtPx(t.mark_px)}</td>
+        <td class="r ${signClass(t.live_r)}" data-l="R now" title="running R-multiple of the rejected trade: positive = it would be winning (the veto is costing money)">${fmtR(t.live_r)}</td>
+        <td class="span2 bar-cell" data-l="Stop \u2192 TP">${bar}</td>
+        <td class="r muted small" data-l="Age" title="${esc(fmtTime(t.ts))}">${t.ts ? esc(fmtAge(nowS - t.ts)) : '\u2014'}</td>
+      </tr>`;
+    }).join('') : emptyRow(7, 'No open shadow trades \u2014 nothing rejected recently.');
+
+    // Resolved strip: the last few finished simulations. \u2713 = the rejecter was right (r < 0, veto saved
+    // money); \u2717 = it blocked a winner (r > 0).
+    const strip = $id('shadowtr-resolved-strip');
+    const last = resolved.slice(0, 6);
+    strip.hidden = !last.length;
+    strip.innerHTML = last.length ? `<span class="watch-label">resolved</span>` + last.map((t) => {
+      const short = String(t.side || '').toLowerCase() === 'short';
+      const who = rejecterOf(t);
+      const right = t.r != null && t.r < 0, wrong = t.r != null && t.r > 0;
+      const mark = right ? '\u2713' : wrong ? '\u2717' : '\u00b7';
+      const stt = String(t.status || '').toLowerCase();
+      const tip = `${who === 'other' ? (t.by || 'unknown') : who} rejected this ${short ? 'short' : 'long'} (entry ${fmtPx(t.entry_px)}, stop ${fmtPx(t.stop_px)}, tp ${fmtPx(t.tp_px)}) \u00b7 ${stt} at ${fmtR(t.r)} \u2014 ${right ? 'the veto saved money' : wrong ? 'the veto blocked a winner' : 'a wash'}`;
+      return `<span class="watch-pill ghost-pill ${right ? 'right' : wrong ? 'wrong' : ''}" title="${esc(tip)}">${esc(t.coin || '?')} ${short ? 'S' : 'L'} \u2192 ${esc(stt || '?')} <span class="${signClass(t.r)}">${fmtR(t.r)}</span> <span class="ghost-verdict">(${esc(BY_SHORT[who] || (t.by ? String(t.by) : '?'))} ${mark})</span></span>`;
+    }).join('') : '';
+  }
+
   // -------------------------------------------------------------- render: decision feed
   function classify(order) {
     if (!order) return 'pending';
@@ -1619,6 +1668,7 @@
     renderMarketBrief();
     renderChart();
     renderPositions();
+    renderShadowTrades();
     renderFeed();
     renderPerformance();
     renderExitQuality();

@@ -183,6 +183,25 @@
     </div>
   </section>
 
+  <!-- Panel 3a-bis: shadow trades (status.shadow_trades - rejected entries, paper-simulated to score the rejecter) -->
+  <section class="panel shadow-panel" id="shadowtr-panel" hidden>
+    <div class="panel-head">
+      <h2><span class="ghost-ico" aria-hidden="true">&#x1F47B;</span> Shadow trades</h2>
+      <span class="muted small">rejected entries, simulated &mdash; do they score the rejecter?</span>
+    </div>
+    <div id="shadowtr-open-block">
+      <div class="table-wrap">
+        <table class="tbl num-tbl cards ghost-tbl" id="shadowtr-open-table">
+          <thead><tr>
+            <th>Coin</th><th>Rejected by</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">R now</th><th>Stop &rarr; TP</th><th class="r">Age</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="shadowtr-resolved-strip" class="watch-strip shadow-resolved" hidden></div>
+  </section>
+
   <!-- Panel 3b: performance analytics (GET /api/analytics, polled every 60 s) -->
   <section class="panel perf-panel" id="perf-panel">
     <div class="panel-head">
