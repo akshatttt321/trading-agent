@@ -205,8 +205,8 @@ class Learner:
     def rejection_scores(self) -> Dict[str, Dict]:
         """Per rejecter (verifier / risk_gate / rr_model) plus 'all'."""
         out = {"all": self._score(self.shadows, "rejection layer")}
-        for who in sorted({s.get("by", "verifier") for s in self.shadows}):
-            out[who] = self._score([s for s in self.shadows if s.get("by", "verifier") == who], who)
+        for who in sorted({(s.get("by") or "other") for s in self.shadows}):   # by=None must not 500 the API
+            out[who] = self._score([s for s in self.shadows if (s.get("by") or "other") == who], who)
         return out
 
     def verifier_score(self) -> Dict:
