@@ -813,7 +813,7 @@
   }
 
   // Stop → TP track: where the current price sits between the stop and the take-profit, with distances from the mark.
-  function rangeBar(p, side) {
+  function rangeBar(p, side, opts) {
     const stop = p.stop_px || null, tp = p.tp_px || null, mark = p.mark_px, entry = p.entry_px;
     if (!mark || !entry) return '<span class="small muted">—</span>';
     if (!stop && !tp) return `<span class="small neg">NO STOP</span> <span class="small muted">· no take-profit</span>${p.liquidation_px ? `<div class="small muted">liq ${fmtPx(p.liquidation_px)}</div>` : ''}`;
@@ -842,7 +842,7 @@
       </div>
       <div class="rlabels small">
         ${leftLabel}
-        ${rNow != null ? `<span class="muted">${(rNow >= 0 ? '+' : '') + rNow.toFixed(2)}R</span>` : ''}
+        ${rNow != null && !(opts && opts.noR) ? `<span class="muted">${(rNow >= 0 ? '+' : '') + rNow.toFixed(2)}R</span>` : ''}
         ${rightLabel}
       </div>
       ${p.liquidation_px ? `<div class="small muted">liq ${fmtPx(p.liquidation_px)} (${fmtPct((p.liquidation_px / mark - 1) * 100, 0)})</div>` : ''}
@@ -911,7 +911,7 @@
       const who = rejecterOf(t);
       // Reuse the positions' stop->TP track when we have mark+entry; else a compact text fallback.
       const bar = t.mark_px != null && t.entry_px != null
-        ? rangeBar({ stop_px: t.stop_px, tp_px: t.tp_px, mark_px: t.mark_px, entry_px: t.entry_px, unrealized_pnl: t.live_r }, side)
+        ? rangeBar({ stop_px: t.stop_px, tp_px: t.tp_px, mark_px: t.mark_px, entry_px: t.entry_px, unrealized_pnl: t.live_r }, side, { noR: true })
         : `<span class="small"><span class="neg">stop ${fmtPx(t.stop_px)}</span> <span class="arrow">\u2192</span> <span class="pos">tp ${fmtPx(t.tp_px)}</span></span>`;
       return `<tr class="ghost-row" title="${esc(t.reason || '')}">
         <td data-l="Coin"><div class="coin">${esc(t.coin || '\u2014')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${t.size_usd != null ? ` <span class="muted">${fmtUSD(t.size_usd)}</span>` : ''}</div></td>

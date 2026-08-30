@@ -190,6 +190,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .brief-panel    { grid-column: 1 / -1; }
 .chart-panel    { grid-column: span 7; }
 .positions-panel{ grid-column: span 5; }
+.shadow-panel   { grid-column: 1 / -1; }
 .perf-panel     { grid-column: 1 / -1; }
 .feed-panel     { grid-column: span 7; }
 .learner-panel  { grid-column: span 5; }
