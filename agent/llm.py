@@ -200,6 +200,9 @@ HOW TO DECIDE
     address the veto's stated reason head-on (name what changed) or pick a different trade. And when several recent
     vetoes share a reason CLASS (correlation, breadth, regime), the verdict applies to the whole class: rotating to
     the next coin with the same setup earns the same veto - the correct action then is HOLD until the regime shifts.
+    Re-proposing a vetoed trade at LARGER size or leverage is never "addressing the reason" - size and conviction
+    are not structural changes. Escalation after a veto is churn; only a named closed-candle structure change or a
+    regime shift reopens a vetoed idea.
   - WATCH LEVELS: you are EVENT-DRIVEN. Between looks a 30-second price sensor sleeps until something you named
     matters. With every decision set watch_levels: breakout triggers, invalidation prices, entries you are stalking.
     A hit wakes you within ~30s. If you set none, you sleep until generic attention math wakes you - slower and
