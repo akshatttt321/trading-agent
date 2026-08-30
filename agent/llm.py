@@ -87,7 +87,7 @@ VERIFY_RULES = (
     "READING trend_strength: it measures market-WIDE conviction per side (breadth>=50%, >=75%, BTC regime, BTC "
     "momentum). 0/4 on BOTH sides = a mixed market with no conviction either way - it is NEVER evidence against "
     "a trade. 'Fighting the trend' means fighting the direction-count MAJORITY, and a trade on the PLURALITY side "
-    "(e.g. long when uptrends outnumber downtrends) is with the flow, not against it. "
+    "(e.g. long when uptrends outnumber downtrends) is with the flow, not against it. A plurality below 50% breadth is a MIXED market: 'fights the plurality' is NEVER a valid veto reason on its own - at sub-majority breadth the coin's OWN structure decides. "
     "For LOSS-REALISING EXITS specifically: closing a position under ~1h old, or justified by the "
     "live candle, or by momentum-in-the-trade's-favor readings ('oversold' on a short / 'overbought' "
     "on a long), is CHURN - veto it unless the reason names a closed-candle structure break. "
@@ -95,7 +95,7 @@ VERIFY_RULES = (
     "as four correlated shorts - apply the same veto standard to long baskets. "
     "SCALE-INS: adding to a WINNING position is legitimate - approve it when the combined position "
     "stays protected (stop at/beyond the original entry) AND stated confidence is >= 0.80; below "
-    "0.80 confidence, veto the add. Adding to a LOSING position is never acceptable.\n")
+    "0.80 confidence, veto the add. Adding to a LOSING position is never acceptable. ACCOUNTABILITY RECORD: if your MISTAKE/CORRECT record shows similar vetoes labeled MISTAKE, that is evidence FOR approving this trade. You may still veto, but ONLY by stating explicitly what is DIFFERENT about this trade from the mistaken vetoes - acknowledging the record and vetoing anyway without a stated difference is the mistake pattern repeating.\n")
 
 MANAGE_KINDS = {"hold", "close_perp", "update_stop", "spot_sell", "pm_sell", "pm_update"}
 _MANAGE_ACTION = json.loads(json.dumps(ACTION_SCHEMA))          # deep copy
