@@ -171,6 +171,7 @@ class RiskCfg(BaseModel):
     breaker_daily_loss_pct: float = 2.0      # ... or day's realized perp pnl worse than -this % of equity
     loss_reentry_cooldown_min: int = 120     # a coin closed at a LOSS (any reason) cannot be re-entered for this long
     max_resting_orders: int = 7
+    limit_replace_min_gap_min: int = 30   # cancel-replace throttle: same coin+side limit younger than this needs a >=0.3xATR level move
     beta_weighted_risk: bool = True
 
 

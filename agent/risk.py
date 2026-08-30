@@ -317,8 +317,19 @@ class RiskGate:
             # A limit that cancel-replaces an existing same-coin+side order is exempt - it does not grow the book.
             if a.order_type == "limit" and a.limit_price and self.r.max_resting_orders:
                 rest_b = self.state.get("resting_orders") or []
-                replaces = any((r.get("action") or {}).get("coin") == a.coin and (r.get("action") or {}).get("side") == a.side for r in rest_b)
-                if not replaces and len(rest_b) >= self.r.max_resting_orders:
+                match = next((r for r in rest_b if (r.get("action") or {}).get("coin") == a.coin and (r.get("action") or {}).get("side") == a.side), None)
+                if match is not None:
+                    # REPLACE THROTTLE (free): a resting limit is already working - re-placing it every look pays for
+                    # another verifier review to move an order a few cents. Replace needs a real level move or age.
+                    age_min = (time.time() - (match.get("ts") or 0)) / 60
+                    old_px = (match.get("action") or {}).get("limit_price") or 0
+                    atr_pct = (((market or {}).get("perps", {}) or {}).get(a.coin) or {}).get("atr14_1h_pct") or 0.25
+                    moved_pct = abs((a.limit_price or 0) - old_px) / old_px * 100 if old_px else 100.0
+                    if age_min < self.r.limit_replace_min_gap_min and moved_pct < 0.3 * atr_pct:
+                        return Verdict(False, f"limit replace throttle: {a.coin} {a.side} limit placed {age_min:.0f}m ago at {old_px}, "
+                                              f"new {a.limit_price} is a {moved_pct:.2f}% nudge (<0.3x ATR {atr_pct:.2f}%) - the resting order "
+                                              f"already works; replace after {self.r.limit_replace_min_gap_min}m or on a >=0.5x ATR level move", a)
+                if match is None and len(rest_b) >= self.r.max_resting_orders:
                     return Verdict(False, f"resting book full ({len(rest_b)}/{self.r.max_resting_orders}) - blocked free; "
                                           f"replace an existing limit (same coin+side) or wait for a fill/expiry", a)
             import json as _json2

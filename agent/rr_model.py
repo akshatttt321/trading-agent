@@ -100,7 +100,10 @@ class RiskRewardModel:
             risk_budget = min(max(kelly, 0) * self.rr.kelly_fraction * eq, max_risk_usd) * learner_mult
             size_cap = risk_budget / risk_frac
             orig = a.size_usd or 0
-            a.size_usd = round(min(orig, size_cap), 2)
+            # min-order floor: a $8 proposal into a $10 venue minimum is a guaranteed rejection - round UP to the
+            # minimum when the risk budget and PM cap allow it; risk caps keep primacy (still rejected below if not).
+            pm_cap = eq * self.cfg.risk.prediction_market_max_pct_equity / 100
+            a.size_usd = round(min(max(orig, self.cfg.risk.min_order_usd), size_cap, pm_cap), 2)
             risk_usd = a.size_usd * risk_frac
             note = f"PM-SWING RR={rr:.2f} p={p:.2f} EV={ev_r:.2f}R stop {a.stop_loss_px:.2f} target {a.take_profit_px:.2f} learner x{learner_mult:.2f}"
             if a.size_usd < self.cfg.risk.min_order_usd:
@@ -144,7 +147,8 @@ class RiskRewardModel:
             kelly_usd = max(kelly, 0) * self.rr.kelly_fraction * eq
             budget = min(kelly_usd, max_risk_usd) * learner_mult
             orig = a.size_usd or 0
-            a.size_usd = round(min(orig, budget), 2)
+            pm_cap = eq * self.cfg.risk.prediction_market_max_pct_equity / 100
+            a.size_usd = round(min(max(orig, self.cfg.risk.min_order_usd), budget, pm_cap), 2)   # min-order round-up; risk caps keep primacy
             note = f"PM edge={edge:+.2f} odds={b:.2f} EV={ev_r:.2f} kelly=${kelly_usd:.0f} learner x{learner_mult:.2f}"
             if a.size_usd < self.cfg.risk.min_order_usd:
                 return RRVerdict(False, f"sized below min order after RR model ({note})", a, a.size_usd, rr, ev_r)
