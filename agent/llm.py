@@ -428,7 +428,12 @@ class Brain:
             return decision, [], Usage()
         proposal = {"market_view": decision.market_view,
                     "actions": [{"index": i, **decision.actions[i].model_dump(exclude_none=True)} for i in idx]}
-        msg = user_msg + "\n\n## PROPOSED ACTIONS TO REVIEW\n" + json.dumps(proposal, separators=(",", ":"))
+        msg = user_msg + ("\n\n## PROPOSED ACTIONS TO REVIEW\n"
+                          "Every action below has ALREADY PASSED the coded rule checks (stop distance, R:R, leverage, margin, "
+                          "position caps). The [metrics(code-verified)] block inside each reason is authoritative arithmetic - "
+                          "NEVER claim a numeric rule violation; if your mental math disagrees with the metrics block, the "
+                          "metrics block is right. Veto only on JUDGMENT: regime fit, correlation/concentration, thesis "
+                          "quality, entry timing.\n" + json.dumps(proposal, separators=(",", ":")))
         c = self._call(self.verifier, self.verifier_system, msg, VERDICT_SCHEMA, "submit_verdicts")
         self.last_verify_failed = bool(c.error or not c.data)
         if c.error or not c.data:

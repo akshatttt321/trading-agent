@@ -872,7 +872,17 @@ class Agent:
                 if not verdict.approved:
                     _reject(a, verdict.reason, "risk_gate")
                     continue
-                pending.append((verdict.action, verdict.reason))
+                va = verdict.action
+                if va.kind == "open_perp" and va.stop_loss_px:      # code-verified arithmetic for the verifier (it must not do math)
+                    ref = va.limit_price if (va.order_type == "limit" and va.limit_price) else prices.get(va.coin)
+                    if ref:
+                        sd = abs(ref - va.stop_loss_px) / ref * 100
+                        rr_v = abs((va.take_profit_px or ref) - ref) / abs(ref - va.stop_loss_px) if ref != va.stop_loss_px else 0.0
+                        longs = sum(1 for pp in snap.perps if pp.size > 0)
+                        shorts = sum(1 for pp in snap.perps if pp.size < 0)
+                        va.reason = (va.reason or "") + (f" [metrics(code-verified): stop {sd:.1f}% of entry (max {self.cfg.risk.max_stop_distance_pct}), "
+                                                         f"RR {rr_v:.2f} (min {self.cfg.rr.min_reward_risk}), book {longs}L/{shorts}S]")
+                pending.append((va, verdict.reason))
                 continue
             # risk-reducing actions (close / tighten stop / sell) execute immediately - rotations close first.
             # Exception: exits that REALISE A LOSS are a judgement call -> reviewed by the verifier (fail-open).
