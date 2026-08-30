@@ -405,7 +405,18 @@ class Agent:
         due = self._manage_due(snap, market.get("perps", {}), now)
         if not due:
             return False
-        msg = build_manager_message(self.cfg, snap, market, self.state.get("starting_equity") or snap.equity_usd)
+        rej_rows = self.state.db.execute(
+            "SELECT ts, action, risk_reason FROM orders WHERE approved=0 AND risk_reason LIKE 'manager%' AND ts > ? ORDER BY ts DESC LIMIT 6",
+            (time.time() - 3 * 3600,)).fetchall()
+        recent_rej = []
+        for rts, ra, rwhy in rej_rows:
+            try:
+                rad = json.loads(ra)
+                recent_rej.append(f"{(time.time() - rts) / 60:.0f}m ago {rad.get('kind')} {rad.get('coin') or rad.get('token_id', '')[:8]}"
+                                  f" -> {str(rwhy).replace('manager: ', '')[:110]}")
+            except Exception:
+                pass
+        msg = build_manager_message(self.cfg, snap, market, self.state.get("starting_equity") or snap.equity_usd, recent_rej)
         try:
             decision, _raw = self.brain.propose_manage(msg)
         except Exception:

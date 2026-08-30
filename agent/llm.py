@@ -328,11 +328,15 @@ live_15m is the current UNCONFIRMED 15m candle: timing info only, never proof of
 live candle, NEVER a stall measured in minutes, and NEVER momentum-in-your-favor readings: RSI oversold while you are
 short (or overbought while long) is CONFIRMATION, not danger. A position younger than ~{cfg.risk.min_position_age_min}
 minutes gets NO exit judgment at all - it was just validated by the proposer, verifier and gates; its stop protects it.
+If a REJECTED-PROPOSALS section is present: those exact moves were bounced by CODED guards minutes ago. The guards
+are deterministic - the same move with unchanged metrics is guaranteed to be rejected again; re-propose ONLY when the
+stated threshold has actually been crossed (R passed the breakeven bar, stop distance now outside the noise floor).
 Do NOT churn: if the stops are right and the trade is working, reply actions=[] or hold.
 Every action needs: reason (short) and confidence (honest 0-1)."""
 
 
-def build_manager_message(cfg: Config, snap: AccountSnapshot, market: Dict, start_equity: float) -> str:
+def build_manager_message(cfg: Config, snap: AccountSnapshot, market: Dict, start_equity: float,
+                          rejections: Optional[List[str]] = None) -> str:
     c = (",", ":")
     KEEP = ("mark", "funding_8h_pct", "signal", "chg_1h_pct", "chg_24h_pct", "atr14_1h_pct", "rsi14_1h", "bb_pos_1h",
             "vol_expansion", "high_24h", "low_24h", "trend_15m", "rsi14_15m", "atr14_15m_pct", "vol_burst_15m", "tf_align_15m", "live_15m")
@@ -341,9 +345,11 @@ def build_manager_message(cfg: Config, snap: AccountSnapshot, market: Dict, star
     goal = {"equity_usd": round(snap.equity_usd, 2),
             "multiple": round(snap.equity_usd / start_equity, 4) if start_equity else 1.0,
             "target_multiple": cfg.goal.target_multiple}
+    rej = ("\n\n## YOUR RECENT PROPOSALS THAT WERE REJECTED (deterministic guards - identical re-proposals WILL be rejected again)\n"
+           + "\n".join(f"- {r}" for r in rejections)) if rejections else ""
     return ("## OPEN POSITIONS (full account)\n" + json.dumps(snap.model_dump(), separators=c) +
             "\n\n## HELD-COIN MARKET DATA (1h regime, 15m timing)\n" + json.dumps(md, separators=c) +
-            "\n\n## GOAL\n" + json.dumps(goal, separators=c) +
+            "\n\n## GOAL\n" + json.dumps(goal, separators=c) + rej +
             "\n\nReview the open positions now. actions=[] if everything is placed right.")
 
 
