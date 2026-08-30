@@ -324,6 +324,10 @@ correlated basket all die to the same bounce - stagger your trails across looks.
 reversal instead of waiting for the stop; bank stalled winners - capital parked in a dead trade is a cost
 (the mandate rewards speed). A scalp that lost its 15m trend (tf_align_15m false, trend_15m against you) is done.
 live_15m is the current UNCONFIRMED 15m candle: timing info only, never proof of a trend change.
+"THESIS BREAK" means a CLOSED-candle structure flip (a trend/signal reversal on closed 15m or 1h data) - NEVER the
+live candle, NEVER a stall measured in minutes, and NEVER momentum-in-your-favor readings: RSI oversold while you are
+short (or overbought while long) is CONFIRMATION, not danger. A position younger than ~{cfg.risk.min_position_age_min}
+minutes gets NO exit judgment at all - it was just validated by the proposer, verifier and gates; its stop protects it.
 Do NOT churn: if the stops are right and the trade is working, reply actions=[] or hold.
 Every action needs: reason (short) and confidence (honest 0-1)."""
 
@@ -433,7 +437,10 @@ class Brain:
                           "position caps). The [metrics(code-verified)] block inside each reason is authoritative arithmetic - "
                           "NEVER claim a numeric rule violation; if your mental math disagrees with the metrics block, the "
                           "metrics block is right. Veto only on JUDGMENT: regime fit, correlation/concentration, thesis "
-                          "quality, entry timing.\n" + json.dumps(proposal, separators=(",", ":")))
+                          "quality, entry timing. "
+                          "For LOSS-REALISING EXITS specifically: closing a position under ~1h old, or justified by the "
+                          "live candle, or by momentum-in-the-trade's-favor readings ('oversold' on a short / 'overbought' "
+                          "on a long), is CHURN - veto it unless the reason names a closed-candle structure break.\n" + json.dumps(proposal, separators=(",", ":")))
         c = self._call(self.verifier, self.verifier_system, msg, VERDICT_SCHEMA, "submit_verdicts")
         self.last_verify_failed = bool(c.error or not c.data)
         if c.error or not c.data:

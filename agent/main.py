@@ -423,6 +423,21 @@ class Agent:
         for a in decision.actions:
             if a.kind == "hold" or a.kind in RISK_ADDING:
                 continue
+            # GRACE PERIOD: a just-opened position was validated by proposer+verifier+gates minutes ago - the manager
+            # may not churn it closed unless it is already meaningfully losing. The hard stop stays armed regardless.
+            if a.kind == "close_perp" and a.coin and self.cfg.risk.min_position_age_min:
+                o = self.learner.open.get(a.coin) or {}
+                pos = next((pp for pp in snap.perps if pp.coin == a.coin), None)
+                if o.get("ts") and pos and (time.time() - o["ts"]) < self.cfg.risk.min_position_age_min * 60:
+                    rpu = abs(pos.entry_px - (pos.stop_px or pos.entry_px))
+                    loss_r = pos.unrealized_pnl / (rpu * abs(pos.size)) if rpu and pos.size else 0.0
+                    if loss_r > -0.5:
+                        age_m = (time.time() - o["ts"]) / 60
+                        why_g = (f"grace period: position {age_m:.0f}m old at {loss_r:+.2f}R - manager closes allowed after "
+                                 f"{self.cfg.risk.min_position_age_min}m or below -0.5R (the stop is armed)")
+                        self.notify.send(f"REJECTED (manager) close {a.coin}: {why_g}", "warning")
+                        self.state.record_order(cycle_id, a.model_dump(), False, "manager: " + why_g, {})
+                        continue
             verdict = self.risk.evaluate(a, snap, cycle_start_ts, funding, regime, market)
             if not verdict.approved:
                 self.notify.send(f"REJECTED (manager) {a.kind} {a.coin or a.outcome or ''}: {verdict.reason}", "warning")
