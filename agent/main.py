@@ -875,10 +875,12 @@ class Agent:
             self.learner.record_veto(a, prices.get(a.coin) if a.coin else None, why, by)   # shadow-simulate to score the rejecter
 
         def _execute(act: Action, reason: str, risk_usd: float) -> None:
+            nonlocal executed_any
             if act.kind == "open_perp" and act.order_type == "limit" and act.limit_price:
                 mark = prices.get(act.coin)
                 if mark and ((act.side == "long" and act.limit_price < mark) or (act.side == "short" and act.limit_price > mark)):
                     self._place_resting(act, reason, risk_usd, regime, decision.market_view, cycle_id)
+                    executed_any = True             # a resting placement is a real commitment
                     return
                 act = act.model_copy()
                 act.order_type = None                     # already marketable - just fill at market now
@@ -888,6 +890,7 @@ class Agent:
             self.notify.send(f"{'FILLED' if res.ok else 'FAILED'} {act.kind} {act.coin or act.outcome or ''} ${act.size_usd or ''}: {res.detail}  [{reason}]",
                              "info" if res.ok else "error")
             if res.ok:
+                executed_any = True
                 key = self.trade_key(act)
                 if act.kind in RISK_ADDING:
                     self.learner.record_open(key, act, risk_usd, regime, (res.raw or {}).get("fill_px") or prices.get(act.coin or ""), decision.market_view)
@@ -897,6 +900,7 @@ class Agent:
                         log.info(lesson)
 
         proposed_any = False
+        executed_any = False                        # only EXECUTED actions reset the hold streak - all-vetoed looks raise the bar
         pending: List[Tuple[Action, str]] = []      # gate-approved risk-adding actions awaiting the verifier
         loss_exits: List[Tuple[Action, str]] = []   # loss-realising exits awaiting the verifier (executed anyway if it is down)
         for a in decision.actions:
@@ -1003,7 +1007,9 @@ class Agent:
 
         self._account_tokens()
         if not pm_scope:                                      # a PM review says nothing about perp-market quietness
-            self.state.set("hold_streak", 0 if proposed_any else int(self.state.get("hold_streak") or 0) + 1)
+            # EXECUTED actions reset the streak; a look whose proposals all got vetoed counts as a hold -
+            # the attention bar climbs and a repeatedly-vetoed proposer is consulted less often, not more.
+            self.state.set("hold_streak", 0 if executed_any else int(self.state.get("hold_streak") or 0) + 1)
 
         self.state.finish_cycle(cycle_id, raw, decision.model_dump() | {"wake": self._wake} | ({"managed": self._managed} if self._managed else {}))
         snap = self.snapshot(prices)

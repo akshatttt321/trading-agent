@@ -197,7 +197,9 @@ HOW TO DECIDE
     price of the move; the same entry as a resting limit gets paid the spread instead.
   - VETO MEMORY: when a RECENTLY VETOED section is present, treat those verdicts as standing: the verifier applies
     consistent judgment, so the identical proposal minutes later gets the identical veto - and costs money. Either
-    address the veto's stated reason head-on (name what changed) or pick a different trade.
+    address the veto's stated reason head-on (name what changed) or pick a different trade. And when several recent
+    vetoes share a reason CLASS (correlation, breadth, regime), the verdict applies to the whole class: rotating to
+    the next coin with the same setup earns the same veto - the correct action then is HOLD until the regime shifts.
   - WATCH LEVELS: you are EVENT-DRIVEN. Between looks a 30-second price sensor sleeps until something you named
     matters. With every decision set watch_levels: breakout triggers, invalidation prices, entries you are stalking.
     A hit wakes you within ~30s. If you set none, you sleep until generic attention math wakes you - slower and
