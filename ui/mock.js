@@ -331,12 +331,12 @@
 
   // ---- learner ----
   const contexts = [
-    { ctx: 'perp|BTC|long|mid|trend', q: 0.31, n: 5, wins: 3, total_r: 1.55, total_pnl: 14.2 },
-    { ctx: 'perp|SOL|short|mid|range', q: 0.48, n: 4, wins: 3, total_r: 1.92, total_pnl: 11.8 },
-    { ctx: 'perp|ETH|long|low|chop', q: -0.62, n: 3, wins: 0, total_r: -1.85, total_pnl: -13.4 },
+    { ctx: 'perp|BTC|long|mid|trend', q: 0.31, n: 5, wins: 3, total_r: 1.55, total_pnl: 14.2, multiplier: 1.0 },
+    { ctx: 'perp|SOL|short|mid|range', q: 0.48, n: 4, wins: 3, total_r: 1.92, total_pnl: 11.8, multiplier: 1.0 },
+    { ctx: 'perp|ETH|long|low|chop', q: -0.62, n: 3, wins: 0, total_r: -1.85, total_pnl: -13.4, multiplier: 0.38 },
     { ctx: 'perp|DOGE|long|high|trend', q: 0.12, n: 2, wins: 1, total_r: 0.25, total_pnl: 2.1 },
     { ctx: 'pm|BTC>80k|Yes|mid|-', q: 0.0, n: 0, wins: 0, total_r: 0, total_pnl: 0 },
-    { ctx: 'perp|HYPE|long|mid|chop', q: -0.35, n: 3, wins: 1, total_r: -1.05, total_pnl: -7.9 },
+    { ctx: 'perp|HYPE|long|mid|chop', q: -0.35, n: 3, wins: 1, total_r: -1.05, total_pnl: -7.9, multiplier: 0.65 },
   ];
   function lessons() {
     const closed = contexts.reduce((a, c) => a + c.n, 0);

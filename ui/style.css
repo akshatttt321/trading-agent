@@ -192,14 +192,10 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .positions-panel{ grid-column: span 5; }
 .shadow-panel   { grid-column: 1 / -1; }
 .perf-panel     { grid-column: 1 / -1; }
-.feed-panel     { grid-column: span 7; }
-.learner-panel  { grid-column: span 5; }
+.feed-panel     { grid-column: 1 / -1; }
 .risk-panel     { grid-column: 1 / -1; }
 @media (max-width: 1500px) {
   .chart-panel, .positions-panel { grid-column: 1 / -1; }
-}
-@media (max-width: 1100px) {
-  .feed-panel, .learner-panel { grid-column: 1 / -1; }
 }
 @media (max-width: 640px) {
   .dash { padding: 12px 10px; gap: 12px; }
@@ -294,7 +290,7 @@ h2 .help, h3 .help, th .help { margin-left: 2px; }
 .empty-title { font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
 .empty-sub { font-size: 13px; line-height: 1.5; }
 .empty-state.compact { padding: 12px; text-align: left; }
-#perps-block[hidden], #spot-block[hidden], #pm-block[hidden], #learner-body[hidden], #perf-body[hidden] { display: none; }
+#perps-block[hidden], #spot-block[hidden], #pm-block[hidden], #perf-body[hidden] { display: none; }
 .sim-badge { display: inline-block; margin-left: 8px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; padding: 2px 8px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-text); border: 1px solid rgba(57,135,229,0.35); vertical-align: middle; text-transform: none; }
 .sim-badge[data-mode="testnet"] { background: var(--warn-soft); color: var(--warn-text); border-color: rgba(250,178,25,0.35); }
 .sim-badge[hidden] { display: none; }
@@ -454,9 +450,10 @@ h2 .help, h3 .help, th .help { margin-left: 2px; }
   .feed-subchips .fchip { flex: 0 0 auto; }
 }
 
-/* ---------- learner ---------- */
+/* ---------- lessons text (shadow & learner panel, Lessons view) ---------- */
 .lessons { font-family: var(--mono); font-size: 12px; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; }
-#learner-open { margin-top: 8px; }
+#shl-open-note { margin-top: 8px; }
+#shl-open-note:empty { display: none; }
 
 /* ---------- performance panel (GET /api/analytics) ---------- */
 .perf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
@@ -523,23 +520,17 @@ h2 .help, h3 .help, th .help { margin-left: 2px; }
 :root:not([data-theme="light"]) .tag-agent { color: #8ab8f2; }
 @media (max-width: 640px) { .vscore { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vs-v { font-size: 20px; } }
 
-/* rejection scoreboard (one row per rejecter) + rejecter chips / By pill on the shadow-trades table */
-.rej-name { font-weight: 600; }
-.tbl td.rej-note { white-space: normal; }
-.tbl td.verdict-cell { white-space: normal; min-width: 260px; }
+/* rejection scoreboard verdict tag + By pill (shared by the shadow table and scoreboard cards) */
 .verdict-tag { display: inline-block; font-size: 12px; line-height: 1.4; padding: 3px 9px; border-radius: 4px; border: 1px solid var(--border-strong); border-left-width: 3px; color: var(--text-2); }
 .verdict-tag.good { background: var(--good-soft); border-color: rgba(34,177,76,0.45); color: var(--good-text, #7fdc9a); }
 .verdict-tag.warn { background: var(--warn-soft); border-color: rgba(250,178,25,0.5); color: var(--warn-text, #f5c964); }
 :root:not([data-theme="light"]) .verdict-tag.good { color: #7fdc9a; }
 :root:not([data-theme="light"]) .verdict-tag.warn { color: #f5c964; }
-.shadow-filters { margin: -2px 0 10px; }
-.shadow-filters .fchip { font-size: 11.5px; padding: 3px 9px; }
 .by-pill { display: inline-block; white-space: nowrap; font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-3); color: var(--text-2); }
 .by-pill.verifier  { background: var(--accent-soft); color: #8ab8f2; border-color: rgba(57,135,229,0.35); }
 .by-pill.risk_gate { background: var(--warn-soft); color: var(--warn); border-color: rgba(250,178,25,0.4); }
 .by-pill.rr_model  { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); }
 :root[data-theme="light"] .by-pill.verifier { color: var(--accent-text); }
-@media (max-width: 640px) { .tbl.cards td.verdict-cell { min-width: 0; } }
 
 .pmort-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 2px; }
 .pmort { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); border-left: 3px solid var(--border-strong); padding: 9px 12px; }
@@ -958,3 +949,31 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 .ghost-pill .ghost-verdict { color: var(--text-3); }
 .ghost-pill.right .ghost-verdict { color: var(--good); }
 .ghost-pill.wrong .ghost-verdict { color: var(--bad); }
+
+/* ---- unified shadow-trades & learner panel: view tabs, scoreboard cards, lessons list ---- */
+.shl-tabs { margin: 2px 0 12px; }
+.shl-tabs .fchip .count { font-family: var(--mono); font-weight: 500; }
+.shl-caption { margin: -4px 0 10px; }
+.rej-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.rej-cards[hidden] { display: none; }
+.rej-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.rej-head { display: flex; align-items: center; gap: 8px; }
+.rej-title { font-weight: 600; }
+.rej-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.rej-stat .v { font-family: var(--mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.rej-stat .l { font-size: 10.5px; line-height: 1.35; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+.rej-empty { padding: 2px 0 4px; }
+.rej-meta { font-family: var(--mono); font-size: 11px; }
+.rej-card .verdict-tag { align-self: flex-start; }
+.ctx-list { display: flex; flex-direction: column; gap: 4px; }
+.ctx-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 5px 9px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.ctx-name { font-family: var(--mono); font-size: 12px; font-weight: 500; word-break: break-all; }
+.ctx-q { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.ctx-meta { margin-left: auto; white-space: nowrap; }
+.ctx-mult { color: var(--text-2); }
+.shl-more { margin-top: 6px; align-self: flex-start; background: transparent; border: 1px solid var(--border); color: var(--text-2); font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; cursor: pointer; }
+.shl-more:hover { border-color: var(--border-strong); color: var(--text); }
+@media (max-width: 640px) {
+  .rej-cards { grid-template-columns: 1fr; }
+  .ctx-meta { margin-left: 0; white-space: normal; flex-basis: 100%; }
+}

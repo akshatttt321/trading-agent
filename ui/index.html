@@ -183,23 +183,58 @@
     </div>
   </section>
 
-  <!-- Panel 3a-bis: shadow trades (status.shadow_trades - rejected entries, paper-simulated to score the rejecter) -->
+  <!-- Panel 3a-bis: shadow trades & learner (status.shadow_trades + GET /api/learner), three tabbed views -->
   <section class="panel shadow-panel" id="shadowtr-panel" hidden>
     <div class="panel-head">
-      <h2><span class="ghost-ico" aria-hidden="true">&#x1F47B;</span> Shadow trades</h2>
-      <span class="muted small">rejected entries, simulated &mdash; do they score the rejecter?</span>
+      <h2><span class="ghost-ico" aria-hidden="true">&#x1F47B;</span> Shadow trades &amp; learner <button class="help" type="button" data-help="shadow" aria-label="What are shadow trades and the learner?">?</button></h2>
+      <span class="muted small">rejected entries, who was right to say no, and what the agent has learned</span>
     </div>
-    <div id="shadowtr-open-block">
-      <div class="table-wrap">
-        <table class="tbl num-tbl cards ghost-tbl" id="shadowtr-open-table">
-          <thead><tr>
-            <th>Coin</th><th>Rejected by</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">R now</th><th>Stop &rarr; TP</th><th class="r">Age</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
+    <div class="fchips shl-tabs" id="shl-tabs" role="tablist" aria-label="Shadow trades and learner views">
+      <button class="fchip active" type="button" data-view="live" role="tab" aria-selected="true">Live shadows</button>
+      <button class="fchip" type="button" data-view="scoreboard" role="tab" aria-selected="false">Scoreboard</button>
+      <button class="fchip" type="button" data-view="lessons" role="tab" aria-selected="false">Lessons</button>
+    </div>
+
+    <!-- View 1: live shadows — open simulated rejections + resolved strip -->
+    <div id="shl-live">
+      <div id="shadowtr-open-block">
+        <div class="table-wrap">
+          <table class="tbl num-tbl cards ghost-tbl" id="shadowtr-open-table">
+            <thead><tr>
+              <th>Coin</th><th>Rejected by</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">R now</th><th>Stop &rarr; TP</th><th class="r">Age</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
+      <div id="shadowtr-resolved-strip" class="watch-strip shadow-resolved" hidden></div>
+      <div id="shl-live-empty" class="empty-state compact" hidden><div class="empty-sub">No shadow trades right now &mdash; nothing has been rejected recently.</div></div>
     </div>
-    <div id="shadowtr-resolved-strip" class="watch-strip shadow-resolved" hidden></div>
+
+    <!-- View 2: rejection scoreboard (GET /api/learner rejection_scores) -->
+    <div id="shl-scoreboard" hidden>
+      <div class="muted small shl-caption">every rejected proposal is paper-simulated &mdash; did saying no save money or block a winner? <button class="help" type="button" data-help="rejection_scores" aria-label="What is the rejection scoreboard?">?</button></div>
+      <div id="rej-cards" class="rej-cards"></div>
+      <div id="shl-score-empty" class="empty-state compact" hidden><div class="empty-sub">No rejection scores yet &mdash; scores appear once the first rejected trade hits its stop or target.</div></div>
+    </div>
+
+    <!-- View 3: learner lessons (GET /api/learner contexts / lessons text / post-mortems) -->
+    <div id="shl-lessons" hidden>
+      <div class="muted small shl-caption">setup scores the learner uses to size trades up or down <button class="help" type="button" data-help="learner" aria-label="What is the online learner?">?</button><span id="shl-learn-sum"></span></div>
+      <div id="shl-ctx-block" hidden>
+        <div id="shl-ctx-list" class="ctx-list"></div>
+      </div>
+      <div id="shl-lessons-block" hidden>
+        <h3 class="sub-head">Lessons fed to the LLM</h3>
+        <pre id="lessons" class="lessons">&mdash;</pre>
+      </div>
+      <div id="shl-open-note" class="muted small"></div>
+      <div id="shl-pmort-block" hidden>
+        <h3 class="sub-head">Post-mortems <span class="count" id="pmort-count"></span> <button class="help" type="button" data-help="postmortem" aria-label="What is a post-mortem?">?</button></h3>
+        <div id="postmortems" class="pmort-list"></div>
+      </div>
+      <div id="shl-lessons-empty" class="empty-state compact" hidden><div class="empty-sub">The learner has nothing to teach yet &mdash; setup scores and lessons appear after the first few closed trades.</div></div>
+    </div>
   </section>
 
   <!-- Panel 3b: performance analytics (GET /api/analytics, polled every 60 s) -->
@@ -330,57 +365,6 @@
     </div>
     <div class="muted small feed-hint">Tap a line to read the model's full reasoning. Newest first; each chip shows the latest 30 cycles of the selected venue and kind.</div>
     <div id="feed" class="feed"></div>
-  </section>
-
-  <!-- Panel 5: learner -->
-  <section class="panel learner-panel">
-    <div class="panel-head">
-      <h2>Online learner <button class="help" type="button" data-help="learner" aria-label="What is the online learner?">?</button></h2>
-      <span id="learner-summary" class="muted small"></span>
-    </div>
-    <div id="learner-empty" class="empty-state" hidden>
-      <div class="empty-title">Learner has nothing to score yet</div>
-      <div class="empty-sub">It needs closed trades before it can rate which setups work. Scores appear after the first few exits.</div>
-    </div>
-    <div id="learner-body">
-    <div class="table-wrap">
-      <table class="tbl num-tbl cards" id="learner-table">
-        <thead><tr>
-          <th>Context <button class="help" type="button" data-help="context" aria-label="What is a context?">?</button></th><th class="r">Q <button class="help" type="button" data-help="q" aria-label="What is Q?">?</button></th><th class="r">n</th><th class="r">Win %</th><th class="r">Avg R <button class="help" type="button" data-help="r" aria-label="What is R?">?</button></th><th class="r">PnL</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <h3 class="sub-head">Lessons fed to the LLM</h3>
-    <pre id="lessons" class="lessons">—</pre>
-    <div id="learner-open" class="muted small"></div>
-    </div>
-    <div id="learner-extra">
-      <h3 class="sub-head">Rejection scoreboard <button class="help" type="button" data-help="rejection_scores" aria-label="What is the rejection scoreboard?">?</button></h3>
-      <div class="table-wrap">
-        <table class="tbl num-tbl cards" id="rejection-table">
-          <thead><tr><th>Rejecter</th><th class="r">Resolved</th><th class="r">Open</th><th class="r">Would have won</th><th class="r">Would have lost</th><th class="r">Avg R</th><th>Verdict</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
-      <h3 class="sub-head">Post-mortems <span class="count" id="pmort-count"></span> <button class="help" type="button" data-help="postmortem" aria-label="What is a post-mortem?">?</button></h3>
-      <div id="postmortems" class="pmort-list"></div>
-
-      <h3 class="sub-head">Shadow trades <span class="count" id="shadow-count"></span> <button class="help" type="button" data-help="shadow" aria-label="What is a shadow trade?">?</button></h3>
-      <div class="fchips shadow-filters" id="shadow-filters" role="tablist" aria-label="Filter shadow trades by rejecter">
-        <button class="fchip active" type="button" data-by="all" role="tab" aria-selected="true">All</button>
-        <button class="fchip" type="button" data-by="verifier" role="tab" aria-selected="false">Verifier</button>
-        <button class="fchip" type="button" data-by="risk_gate" role="tab" aria-selected="false">Gate</button>
-        <button class="fchip" type="button" data-by="rr_model" role="tab" aria-selected="false">RR</button>
-      </div>
-      <div class="table-wrap">
-        <table class="tbl num-tbl cards" id="shadow-table">
-          <thead><tr><th>When</th><th>Trade</th><th>By</th><th>Status</th><th class="r">R</th><th class="r">Entry · Stop · TP</th><th class="r">Conf</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
   </section>
 
   <!-- Panel 6: risk limits -->

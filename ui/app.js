@@ -47,7 +47,9 @@
     dailyChart: null,
     feedVenue: 'crypto',      // decision-feed top tab: crypto | pm
     feedKind: 'all',          // decision-feed sub-chip: all | new | updates | rejected | holds | quiet | errors
-    shadowBy: 'all',          // rejecter chip on the shadow-trades table: all | verifier | risk_gate | rr_model
+    shadowTab: 'live',        // shadow & learner panel view tab: live | scoreboard | lessons (survives re-render)
+    shlCtxAll: false,         // lessons view: show all setup contexts (vs top 6)
+    shlPmAll: false,          // lessons view: show all post-mortems (vs latest 3)
     feedOpen: new Set(),      // cycle ids the user expanded (survive re-render)
     feedQuietOpen: new Set(), // 'All' view: collapsed quiet-run rows the user expanded, keyed by the run's newest cycle id (survive re-render)
   };
@@ -886,21 +888,68 @@
   }
 
 
-  // -------------------------------------------------------------- render: shadow trades (status.shadow_trades)
-  // Rejected entries (verifier / risk gate / RR model) that the agent paper-simulates to score the rejecter.
-  // live_r / r read from the REJECTED trade's point of view: positive = it would be winning, i.e. the veto is
-  // costing money (bad for the rejecter); negative = the veto saved money.
-  function renderShadowTrades() {
+  // -------------------------------------------------------------- render: shadow trades & learner (one panel, three views)
+  // Live shadows come from status.shadow_trades (rejected entries the agent paper-simulates to score the
+  // rejecter); the Scoreboard and Lessons views come from GET /api/learner. live_r / r read from the REJECTED
+  // trade's point of view: positive = it would be winning, i.e. the veto is costing money (bad for the rejecter).
+  // The three layers that can reject a proposal (API_ANALYTICS.md: rejection_scores keys / shadow_trades[].by).
+  const REJECTERS = [['all', 'All', 'all rejecters'], ['verifier', 'Verifier', 'the verifier'], ['risk_gate', 'Risk gate', 'the risk gate'], ['rr_model', 'RR model', 'the RR model']];
+  const BY_SHORT = { verifier: 'verifier', risk_gate: 'gate', rr_model: 'RR' };
+  // Who rejected a shadow trade: the `by` field, else inferred from the reason prefix (older payloads), else 'other'.
+  function rejecterOf(t) {
+    const by = String(t.by || '').toLowerCase();
+    if (BY_SHORT[by]) return by;
+    const r = String(t.reason || '');
+    return /^verifier/i.test(r) ? 'verifier' : /^(risk[ _-]?)?gate/i.test(r) ? 'risk_gate' : /^rr/i.test(r) ? 'rr_model' : 'other';
+  }
+  const SHL_VIEWS = { live: 'shl-live', scoreboard: 'shl-scoreboard', lessons: 'shl-lessons' };
+  const SHL_LABELS = { live: 'Live shadows', scoreboard: 'Scoreboard', lessons: 'Lessons' };
+
+  function renderShadowLearner() {
+    // The served page may predate this panel (stale index.html cached against a newer app.js):
+    // if its skeleton is missing, skip quietly instead of throwing and killing renderAll.
+    const panel = $id('shadowtr-panel'), tabs = $id('shl-tabs');
+    if (!panel || !tabs) return;
     const st = (state.status && state.status.shadow_trades) || {};
     const open = Array.isArray(st.open) ? st.open.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
     const resolved = Array.isArray(st.resolved) ? st.resolved.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
-    // The served page may predate this panel (stale index.html cached against a newer app.js):
-    // if any of its elements are missing, skip quietly instead of throwing and killing renderAll.
-    const panel = $id('shadowtr-panel');
-    if (!panel) return;
-    panel.hidden = !open.length && !resolved.length;
+    const L = state.learner || {};
+    // Rejection scores; falls back to the legacy verifier_score shape when rejection_scores is absent.
+    const rs = L.rejection_scores && typeof L.rejection_scores === 'object' ? L.rejection_scores
+      : L.verifier_score && typeof L.verifier_score === 'object' ? { verifier: L.verifier_score } : null;
+    const ctxs = (Array.isArray(L.contexts) ? L.contexts : []).slice().sort((a, b) => (b.n || 0) - (a.n || 0) || (b.q || 0) - (a.q || 0));
+    const pms = Array.isArray(L.postmortems) ? L.postmortems.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
+    const lessonsTxt = typeof L.lessons === 'string' ? L.lessons.trim() : '';
+    const openScored = Array.isArray(L.open) ? L.open : [];
+
+    const hasLive = open.length > 0 || resolved.length > 0;
+    const hasScore = !!rs;
+    const hasLessons = ctxs.length > 0 || pms.length > 0 || !!lessonsTxt || openScored.length > 0;
+    panel.hidden = !hasLive && !hasScore && !hasLessons;
     if (panel.hidden) return;
+
+    // Tab row: active chip + counts. state.shadowTab survives the poll re-render (same pattern as state.feedKind).
+    if (!SHL_VIEWS[state.shadowTab]) state.shadowTab = 'live';
+    const counts = { live: open.length, scoreboard: 0, lessons: ctxs.length };
+    tabs.querySelectorAll('.fchip').forEach((b) => {
+      const v = b.dataset.view;
+      const on = v === state.shadowTab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+      b.innerHTML = esc(SHL_LABELS[v] || v) + (counts[v] ? ` <span class="count">&middot; ${counts[v]}</span>` : '');
+    });
+    Object.keys(SHL_VIEWS).forEach((v) => { const el = $id(SHL_VIEWS[v]); if (el) el.hidden = v !== state.shadowTab; });
+
+    renderShadowLive(open, resolved);
+    renderRejScoreboard(rs);
+    renderLearnerLessons(ctxs, pms, lessonsTxt, openScored);
+  }
+
+  // View 1: the open-shadows ghost table + resolved strip (behavior unchanged from the old panel).
+  function renderShadowLive(open, resolved) {
     const nowS = Date.now() / 1000;
+    const emptyEl = $id('shl-live-empty');
+    if (emptyEl) emptyEl.hidden = open.length > 0 || resolved.length > 0;
 
     const openBlock = $id('shadowtr-open-block');
     if (openBlock) openBlock.hidden = !open.length;
@@ -912,20 +961,20 @@
       // Reuse the positions' stop->TP track when we have mark+entry; else a compact text fallback.
       const bar = t.mark_px != null && t.entry_px != null
         ? rangeBar({ stop_px: t.stop_px, tp_px: t.tp_px, mark_px: t.mark_px, entry_px: t.entry_px, unrealized_pnl: t.live_r }, side, { noR: true })
-        : `<span class="small"><span class="neg">stop ${fmtPx(t.stop_px)}</span> <span class="arrow">\u2192</span> <span class="pos">tp ${fmtPx(t.tp_px)}</span></span>`;
+        : `<span class="small"><span class="neg">stop ${fmtPx(t.stop_px)}</span> <span class="arrow">→</span> <span class="pos">tp ${fmtPx(t.tp_px)}</span></span>`;
       return `<tr class="ghost-row" title="${esc(t.reason || '')}">
-        <td data-l="Coin"><div class="coin">${esc(t.coin || '\u2014')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${t.size_usd != null ? ` <span class="muted">${fmtUSD(t.size_usd)}</span>` : ''}</div></td>
+        <td data-l="Coin"><div class="coin">${esc(t.coin || '—')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${t.size_usd != null ? ` <span class="muted">${fmtUSD(t.size_usd)}</span>` : ''}</div></td>
         <td data-l="Rejected by"><span class="by-pill ${esc(who)}" title="rejected by ${esc(who === 'other' ? 'unknown' : (REJECTERS.find((r) => r[0] === who) || [])[2] || who)}">${esc(BY_SHORT[who] || (t.by ? String(t.by) : '?'))}</span></td>
         <td class="r" data-l="Entry">${fmtPx(t.entry_px)}</td>
         <td class="r" data-l="Mark">${fmtPx(t.mark_px)}</td>
         <td class="r ${signClass(t.live_r)}" data-l="R now" title="running R-multiple of the rejected trade: positive = it would be winning (the veto is costing money)">${fmtR(t.live_r)}</td>
-        <td class="span2 bar-cell" data-l="Stop \u2192 TP">${bar}</td>
-        <td class="r muted small" data-l="Age" title="${esc(fmtTime(t.ts))}">${t.ts ? esc(fmtAge(nowS - t.ts)) : '\u2014'}</td>
+        <td class="span2 bar-cell" data-l="Stop → TP">${bar}</td>
+        <td class="r muted small" data-l="Age" title="${esc(fmtTime(t.ts))}">${t.ts ? esc(fmtAge(nowS - t.ts)) : '—'}</td>
       </tr>`;
-    }).join('') : emptyRow(7, 'No open shadow trades \u2014 nothing rejected recently.');
+    }).join('') : emptyRow(7, 'No open shadow trades — nothing rejected recently.');
 
-    // Resolved strip: the last few finished simulations. \u2713 = the rejecter was right (r < 0, veto saved
-    // money); \u2717 = it blocked a winner (r > 0).
+    // Resolved strip: the last few finished simulations. ✓ = the rejecter was right (r < 0, veto saved
+    // money); ✗ = it blocked a winner (r > 0).
     const strip = $id('shadowtr-resolved-strip');
     if (!strip) return;
     const last = resolved.slice(0, 6);
@@ -934,11 +983,121 @@
       const short = String(t.side || '').toLowerCase() === 'short';
       const who = rejecterOf(t);
       const right = t.r != null && t.r < 0, wrong = t.r != null && t.r > 0;
-      const mark = right ? '\u2713' : wrong ? '\u2717' : '\u00b7';
+      const mark = right ? '✓' : wrong ? '✗' : '·';
       const stt = String(t.status || '').toLowerCase();
-      const tip = `${who === 'other' ? (t.by || 'unknown') : who} rejected this ${short ? 'short' : 'long'} (entry ${fmtPx(t.entry_px)}, stop ${fmtPx(t.stop_px)}, tp ${fmtPx(t.tp_px)}) \u00b7 ${stt} at ${fmtR(t.r)} \u2014 ${right ? 'the veto saved money' : wrong ? 'the veto blocked a winner' : 'a wash'}`;
-      return `<span class="watch-pill ghost-pill ${right ? 'right' : wrong ? 'wrong' : ''}" title="${esc(tip)}">${esc(t.coin || '?')} ${short ? 'S' : 'L'} \u2192 ${esc(stt || '?')} <span class="${signClass(t.r)}">${fmtR(t.r)}</span> <span class="ghost-verdict">(${esc(BY_SHORT[who] || (t.by ? String(t.by) : '?'))} ${mark})</span></span>`;
+      const tip = `${who === 'other' ? (t.by || 'unknown') : who} rejected this ${short ? 'short' : 'long'} (entry ${fmtPx(t.entry_px)}, stop ${fmtPx(t.stop_px)}, tp ${fmtPx(t.tp_px)}) · ${stt} at ${fmtR(t.r)} — ${right ? 'the veto saved money' : wrong ? 'the veto blocked a winner' : 'a wash'}`;
+      return `<span class="watch-pill ghost-pill ${right ? 'right' : wrong ? 'wrong' : ''}" title="${esc(tip)}">${esc(t.coin || '?')} ${short ? 'S' : 'L'} → ${esc(stt || '?')} <span class="${signClass(t.r)}">${fmtR(t.r)}</span> <span class="ghost-verdict">(${esc(BY_SHORT[who] || (t.by ? String(t.by) : '?'))} ${mark})</span></span>`;
     }).join('') : '';
+  }
+
+  // View 2: rejection scoreboard - one compact card per rejecter (✓ saved money vs ✗ blocked winners).
+  function renderRejScoreboard(rs) {
+    const cards = $id('rej-cards');
+    if (!cards) return;
+    const emptyEl = $id('shl-score-empty');
+    if (emptyEl) emptyEl.hidden = !!rs;
+    cards.hidden = !rs;
+    if (!rs) { cards.innerHTML = ''; return; }
+    cards.innerHTML = REJECTERS.map(([key, label]) => {
+      const s = rs[key];
+      const pill = `<span class="by-pill ${key === 'all' ? '' : key}">${esc(key === 'all' ? 'all' : BY_SHORT[key] || key)}</span>`;
+      const head = `<div class="rej-head">${pill}<span class="rej-title">${esc(label)}</span></div>`;
+      if (!s || typeof s !== 'object') return `<div class="rej-card">${head}<div class="muted small rej-empty">no data yet</div></div>`;
+      if (!n0(s.resolved)) return `<div class="rej-card">${head}<div class="muted small rej-empty">nothing resolved yet &middot; ${n0(s.open)} open</div></div>`;
+      const won = n0(s.vetoed_would_have_won), lost = n0(s.vetoed_would_have_lost);
+      const netSaved = s.sum_r_saved != null ? Number(s.sum_r_saved) : s.avg_r_of_vetoed != null ? -s.avg_r_of_vetoed * n0(s.resolved) : null;
+      const verdict = String(s.verdict || '').trim();
+      const vShort = /EARNING/i.test(verdict) ? '✓ earning its cost' : /TOO STRICT/i.test(verdict) ? '✗ too strict' : '';
+      const vcls = /EARNING/i.test(verdict) ? 'good' : /TOO STRICT/i.test(verdict) ? 'warn' : '';
+      return `<div class="rej-card">
+        ${head}
+        <div class="rej-stats">
+          <div class="rej-stat" title="rejections that saved money: the trade would have lost"><div class="v ${lost ? 'pos' : ''}">✓ ${lost}</div><div class="l">saved money</div></div>
+          <div class="rej-stat" title="rejections that cost a winner: the trade would have won"><div class="v ${won ? 'neg' : ''}">✗ ${won}</div><div class="l">blocked winners</div></div>
+          <div class="rej-stat" title="net R the rejections avoided losing (negative = blocking cost money)"><div class="v ${netSaved != null ? signClass(netSaved) : ''}">${netSaved != null ? fmtR(netSaved) : '—'}</div><div class="l">net R saved</div></div>
+        </div>
+        <div class="rej-meta muted small">${n0(s.resolved)} scored &middot; ${n0(s.open)} open &middot; avg ${fmtR(s.avg_r_of_vetoed)} / rejected trade</div>
+        ${vShort ? `<div class="verdict-tag ${vcls}" title="${esc(verdict)}">${esc(vShort)}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  // View 3: what the learner has extracted - setup scores, the lessons text fed to the LLM, post-mortems.
+  const SHL_CTX_N = 6, SHL_PM_N = 3;
+  function renderLearnerLessons(ctxs, pms, lessonsTxt, openScored) {
+    const block = $id('shl-ctx-block');
+    if (!block) return;
+    const any = ctxs.length > 0 || pms.length > 0 || !!lessonsTxt || openScored.length > 0;
+    const emptyEl = $id('shl-lessons-empty');
+    if (emptyEl) emptyEl.hidden = any;
+
+    // One-line summary next to the caption.
+    const scored = ctxs.filter((c) => n0(c.n) > 0);
+    const closed = scored.reduce((a, c) => a + n0(c.n), 0);
+    const wins = scored.reduce((a, c) => a + n0(c.wins), 0);
+    const pnl = scored.reduce((a, c) => a + (c.total_pnl || 0), 0);
+    $id('shl-learn-sum').innerHTML = closed
+      ? ` &middot; ${ctxs.length} setups &middot; ${closed} closed &middot; win ${Math.round(wins / closed * 100)}% &middot; realized <span class="${signClass(pnl)} num">${fmtUSD(pnl, true)}</span>`
+      : ctxs.length ? ` &middot; ${ctxs.length} setups seen, none closed yet` : '';
+
+    // Setup contexts: compact rows, top N with a "show all" toggle (state.shlCtxAll survives re-render).
+    block.hidden = !ctxs.length;
+    if (ctxs.length) {
+      const showAll = state.shlCtxAll || ctxs.length <= SHL_CTX_N;
+      const list = showAll ? ctxs : ctxs.slice(0, SHL_CTX_N);
+      const maxQ = Math.max(0.01, ...ctxs.map((c) => Math.abs(c.q || 0)));
+      const more = ctxs.length > SHL_CTX_N
+        ? `<button type="button" class="shl-more" data-more="ctx">${state.shlCtxAll ? `show top ${SHL_CTX_N}` : `show all ${ctxs.length} setups`}</button>` : '';
+      $id('shl-ctx-list').innerHTML = list.map((c) => {
+        const n = n0(c.n);
+        const wr = n ? Math.round((n0(c.wins) / n) * 100) : null;
+        const avgR = n ? (c.total_r || 0) / n : null;
+        const w = Math.round((Math.abs(c.q || 0) / maxQ) * 40);
+        const mult = c.multiplier != null ? c.multiplier : c.size_multiplier != null ? c.size_multiplier : null;
+        return `<div class="ctx-row">
+          <span class="ctx-name">${esc(c.ctx)}</span>
+          <span class="ctx-q ${signClass(c.q)}" title="the learner's running score for this setup, in R units">${c.q != null ? (c.q > 0 ? '+' : '') + Number(c.q).toFixed(2) + 'R' : '—'}<span class="q-bar" style="width:${w}px;background:${(c.q || 0) >= 0 ? 'var(--good)' : 'var(--bad)'}"></span></span>
+          <span class="ctx-meta muted small">${n ? `${n} trade${n === 1 ? '' : 's'} &middot; win ${wr}%${avgR != null ? ` &middot; avg ${fmtR(avgR)}` : ''}` : 'no closed trades yet'}${mult != null ? ` &middot; <span class="ctx-mult" title="size multiplier the learner applies to this setup">size ${Number(mult).toFixed(2)}x</span>` : ''}</span>
+        </div>`;
+      }).join('') + more;
+    } else $id('shl-ctx-list').innerHTML = '';
+
+    // Lessons text fed to the LLM.
+    const lb = $id('shl-lessons-block');
+    if (lb) lb.hidden = !lessonsTxt;
+    if (lessonsTxt) $id('lessons').textContent = lessonsTxt;
+
+    // Open trades still being scored.
+    $id('shl-open-note').innerHTML = openScored.length
+      ? 'Open trades being scored: ' + openScored.map((o) => `<code>${esc(o.key)}</code> ${esc(o.ctx)} (risk ${fmtUSD(o.risk_usd)})`).join(' &middot; ') : '';
+
+    // Post-mortems (newest first, latest N with a "show all" toggle; state.shlPmAll survives re-render).
+    const pb = $id('shl-pmort-block');
+    if (pb) pb.hidden = !pms.length;
+    if (pms.length) {
+      $id('pmort-count').textContent = `(${pms.length})`;
+      const showAll = state.shlPmAll || pms.length <= SHL_PM_N;
+      const list = showAll ? pms : pms.slice(0, SHL_PM_N);
+      const more = pms.length > SHL_PM_N
+        ? `<button type="button" class="shl-more" data-more="pm">${state.shlPmAll ? `show latest ${SHL_PM_N}` : `show all ${pms.length}`}</button>` : '';
+      $id('postmortems').innerHTML = list.map((p) => {
+        const R = p.R != null ? p.R : p.r;
+        const side = String(p.side || '').toLowerCase();
+        const parts = String(p.lesson || '').split(/\n\s*lesson:\s*/i);
+        const body = esc(parts[0].trim()) + (parts.length > 1 ? `<div class="pmort-lesson"><span class="k">Lesson</span>${esc(parts.slice(1).join(' ').trim())}</div>` : '');
+        return `<article class="pmort ${R != null ? (R > 0 ? 'win' : 'loss') : ''}">
+          <div class="pmort-head">
+            <span class="coin">${esc(p.coin || '—')}</span>
+            ${side ? `<span class="side-pill ${side === 'short' || side === 'no' ? 'short' : 'long'}">${esc(side.toUpperCase())}</span>` : ''}
+            <span class="rtag ${signClass(R)}">${fmtR(R)}</span>
+            <span class="num ${signClass(p.pnl)}">${fmtUSD(p.pnl, true)}</span>
+            ${p.closed_by ? `<span class="tag tag-${closeClass(p.closed_by)}">${esc(p.closed_by)}</span>` : ''}
+            <span class="muted small pmort-when" title="${esc(fmtTime(p.ts))}">${p.ts ? esc(fmtAge(Date.now() / 1000 - p.ts)) + ' ago' : ''}</span>
+          </div>
+          <div class="pmort-body">${body || '<span class="muted">(no text)</span>'}</div>
+        </article>`;
+      }).join('') + more;
+    }
   }
 
   // -------------------------------------------------------------- render: decision feed
@@ -1233,12 +1392,20 @@
     if (state.feedQuietOpen.has(key)) state.feedQuietOpen.delete(key); else state.feedQuietOpen.add(key);
     renderFeed();
   });
-  $id('shadow-filters').addEventListener('click', (e) => {
+  // Shadow & learner panel: view tabs (active tab survives the poll re-render, like the feed chips).
+  $id('shl-tabs').addEventListener('click', (e) => {
     const b = e.target.closest('.fchip');
     if (!b) return;
-    state.shadowBy = b.dataset.by || 'all';
-    $id('shadow-filters').querySelectorAll('.fchip').forEach((x) => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-selected', on ? 'true' : 'false'); });
-    renderLearnerExtras();
+    state.shadowTab = b.dataset.view || 'live';
+    renderShadowLearner();
+  });
+  // "Show all / show top" toggles inside the Lessons view (also survive the poll re-render).
+  $id('shadowtr-panel').addEventListener('click', (e) => {
+    const b = e.target.closest('.shl-more');
+    if (!b) return;
+    if (b.dataset.more === 'ctx') state.shlCtxAll = !state.shlCtxAll;
+    else if (b.dataset.more === 'pm') state.shlPmAll = !state.shlPmAll;
+    renderShadowLearner();
   });
   // Venue tabs (Crypto / PM) — the feed's top axis.
   $id('feed-tabs').addEventListener('click', (e) => {
@@ -1256,45 +1423,6 @@
     state.feedKind = b.dataset.kind;
     selectFeed();
   });
-
-  // -------------------------------------------------------------- render: learner
-  function renderLearner() {
-    const L = state.learner;
-    const tbody = $id('learner-table').querySelector('tbody');
-    const ctxs = L ? (L.contexts || []).slice().sort((a, b) => (b.n || 0) - (a.n || 0) || (b.q || 0) - (a.q || 0)) : [];
-    const scored = ctxs.some((c) => (c.n || 0) > 0);
-    $id('learner-empty').hidden = scored;
-    $id('learner-body').hidden = !scored;
-    if (!scored) {
-      $id('learner-summary').textContent = L && ctxs.length ? `${ctxs.length} contexts seen, none closed yet` : '';
-      const openN = L && Array.isArray(L.open) ? L.open.length : 0;
-      $id('learner-empty').querySelector('.empty-sub').textContent = openN ? `${openN} open trade${openN > 1 ? 's are' : ' is'} being tracked; scores appear once trades close.` : 'It needs closed trades before it can rate which setups work. Scores appear after the first few exits.';
-      return;
-    }
-    const maxQ = Math.max(0.01, ...ctxs.map((c) => Math.abs(c.q || 0)));
-    tbody.innerHTML = ctxs.length ? ctxs.map((c) => {
-      const n = c.n || 0;
-      const wr = n ? (c.wins / n) * 100 : null;
-      const avgR = n ? c.total_r / n : null;
-      const w = Math.round((Math.abs(c.q || 0) / maxQ) * 40);
-      const bar = `<span class="q-bar" style="width:${w}px;background:${(c.q || 0) >= 0 ? 'var(--good)' : 'var(--bad)'}"></span>`;
-      return `<tr>
-        <td class="coin span2" data-l="Context" style="font-family:var(--mono);font-weight:500">${esc(c.ctx)}</td>
-        <td class="r ${signClass(c.q)}" data-l="Q">${c.q != null ? (c.q > 0 ? '+' : '') + c.q.toFixed(2) + 'R' : '—'}${bar}</td>
-        <td class="r" data-l="Trades">${n}</td>
-        <td class="r" data-l="Win %">${wr == null ? '—' : wr.toFixed(0) + '%'}</td>
-        <td class="r ${signClass(avgR)}" data-l="Avg R">${avgR == null ? '—' : (avgR > 0 ? '+' : '') + avgR.toFixed(2)}</td>
-        <td class="r ${signClass(c.total_pnl)}" data-l="PnL">${fmtUSD(c.total_pnl, true)}</td>
-      </tr>`;
-    }).join('') : emptyRow(6, 'No contexts scored yet');
-    const closed = ctxs.reduce((a, c) => a + (c.n || 0), 0);
-    const wins = ctxs.reduce((a, c) => a + (c.wins || 0), 0);
-    const pnl = ctxs.reduce((a, c) => a + (c.total_pnl || 0), 0);
-    $id('learner-summary').innerHTML = `${ctxs.length} contexts · ${closed} closed · win ${closed ? Math.round(wins / closed * 100) : 0}% · realized <span class="${signClass(pnl)} num">${fmtUSD(pnl, true)}</span>`;
-    $id('lessons').textContent = L.lessons || '(no lessons yet)';
-    const open = L.open || [];
-    $id('learner-open').innerHTML = open.length ? 'Open trades being scored: ' + open.map((o) => `<code>${esc(o.key)}</code> ${esc(o.ctx)} (risk ${fmtUSD(o.risk_usd)})`).join(' · ') : '';
-  }
 
   // -------------------------------------------------------------- render: performance (GET /api/analytics)
   const NO_TRADES = 'No closed trades yet — stats appear after the first stop/TP/close';
@@ -1539,88 +1667,6 @@
     canvas.title = rows.map((d) => `${d.day}: ${fmtUSD(d.pnl, true)} (open ${fmtUSD(d.open)} → close ${fmtUSD(d.close)})`).join('\n');
   }
 
-  // -------------------------------------------------------------- render: learner extras (post-mortems, rejection scoreboard, shadow trades)
-  // The three layers that can reject a proposal (API_ANALYTICS.md: rejection_scores keys / shadow_trades[].by).
-  const REJECTERS = [['all', 'All', 'all rejecters'], ['verifier', 'Verifier', 'the verifier'], ['risk_gate', 'Risk gate', 'the risk gate'], ['rr_model', 'RR model', 'the RR model']];
-  const BY_SHORT = { verifier: 'verifier', risk_gate: 'gate', rr_model: 'RR' };
-  // Who rejected a shadow trade: the `by` field, else inferred from the reason prefix (older payloads), else 'other'.
-  function rejecterOf(t) {
-    const by = String(t.by || '').toLowerCase();
-    if (BY_SHORT[by]) return by;
-    const r = String(t.reason || '');
-    return /^verifier/i.test(r) ? 'verifier' : /^(risk[ _-]?)?gate/i.test(r) ? 'risk_gate' : /^rr/i.test(r) ? 'rr_model' : 'other';
-  }
-  function renderLearnerExtras() {
-    const L = state.learner || {};
-
-    // Rejection scoreboard: one row per rejecter. Falls back to the legacy verifier_score when rejection_scores is absent.
-    const rs = L.rejection_scores && typeof L.rejection_scores === 'object' ? L.rejection_scores
-      : L.verifier_score && typeof L.verifier_score === 'object' ? { verifier: L.verifier_score } : null;
-    $id('rejection-table').querySelector('tbody').innerHTML = !rs
-      ? emptyRow(7, 'No rejection scores yet — every rejected proposal is shadow-simulated; scores appear once the first one hits its stop or target.')
-      : REJECTERS.map(([key, label]) => {
-        const s = rs[key];
-        const name = `<td data-l="Rejecter" class="rej-name">${label}</td>`;
-        if (!s || typeof s !== 'object') return `<tr>${name}<td class="muted span2 rej-note" colspan="6" data-l="Score">no data</td></tr>`;
-        if (!n0(s.resolved)) return `<tr>${name}<td class="muted span2 rej-note" colspan="6" data-l="Score">nothing resolved yet · ${n0(s.open)} open</td></tr>`;
-        const won = n0(s.vetoed_would_have_won), lost = n0(s.vetoed_would_have_lost);
-        const verdict = String(s.verdict || '').trim();
-        const vcls = /EARNING/i.test(verdict) ? 'good' : /TOO STRICT/i.test(verdict) ? 'warn' : '';
-        return `<tr>
-          ${name}
-          <td class="r" data-l="Resolved">${n0(s.resolved)}</td>
-          <td class="r" data-l="Open">${n0(s.open)}</td>
-          <td class="r ${won ? 'neg' : ''}" data-l="Would have won" title="rejections that cost a winner">${won}</td>
-          <td class="r ${lost ? 'pos' : ''}" data-l="Would have lost" title="rejections that saved money">${lost}</td>
-          <td class="r ${signClass(s.avg_r_of_vetoed)}" data-l="Avg R" title="average R of the rejected trades; negative = rejecting was right">${fmtR(s.avg_r_of_vetoed)}</td>
-          <td class="verdict-cell span2" data-l="Verdict">${verdict ? `<span class="verdict-tag ${vcls}">${esc(verdict)}</span>` : '<span class="muted">—</span>'}</td>
-        </tr>`;
-      }).join('');
-
-    // Post-mortems (newest first)
-    const pms = Array.isArray(L.postmortems) ? L.postmortems.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
-    $id('pmort-count').textContent = pms.length ? `(${pms.length})` : '';
-    $id('postmortems').innerHTML = pms.length ? pms.map((p) => {
-      const R = p.R != null ? p.R : p.r;
-      const side = String(p.side || '').toLowerCase();
-      const parts = String(p.lesson || '').split(/\n\s*lesson:\s*/i);
-      const body = esc(parts[0].trim()) + (parts.length > 1 ? `<div class="pmort-lesson"><span class="k">Lesson</span>${esc(parts.slice(1).join(' ').trim())}</div>` : '');
-      return `<article class="pmort ${R != null ? (R > 0 ? 'win' : 'loss') : ''}">
-        <div class="pmort-head">
-          <span class="coin">${esc(p.coin || '—')}</span>
-          ${side ? `<span class="side-pill ${side === 'short' || side === 'no' ? 'short' : 'long'}">${esc(side.toUpperCase())}</span>` : ''}
-          <span class="rtag ${signClass(R)}">${fmtR(R)}</span>
-          <span class="num ${signClass(p.pnl)}">${fmtUSD(p.pnl, true)}</span>
-          ${p.closed_by ? `<span class="tag tag-${closeClass(p.closed_by)}">${esc(p.closed_by)}</span>` : ''}
-          <span class="muted small pmort-when" title="${esc(fmtTime(p.ts))}">${p.ts ? esc(fmtAge(Date.now() / 1000 - p.ts)) + ' ago' : ''}</span>
-        </div>
-        <div class="pmort-body">${body || '<span class="muted">(no text)</span>'}</div>
-      </article>`;
-    }).join('') : '<div class="empty-state compact"><div class="empty-sub">No post-mortems yet — the model writes one after a trade closes, and the lesson is fed back into future prompts.</div></div>';
-
-    // Shadow trades (rejected proposals, tracked but never placed), filtered by the active rejecter chip
-    const all = Array.isArray(L.shadow_trades) ? L.shadow_trades.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
-    const by = state.shadowBy;
-    const sh = by === 'all' ? all : all.filter((t) => rejecterOf(t) === by);
-    const byLabel = (REJECTERS.find((r) => r[0] === by) || [])[2] || by;
-    $id('shadow-count').textContent = all.length ? `(${sh.length}${sh.length !== all.length ? ' of ' + all.length : ''})` : '';
-    $id('shadow-table').querySelector('tbody').innerHTML = sh.length ? sh.map((t) => {
-      const side = String(t.side || '').toLowerCase();
-      const st = String(t.status || 'open').toLowerCase();
-      const stCls = ['open', 'stopped', 'target', 'expired'].includes(st) ? st : 'other';
-      const who = rejecterOf(t);
-      return `<tr>
-        <td class="muted small nowrap" data-l="When" title="${esc(fmtTime(t.ts))}">${esc(fmtTime(t.ts))}</td>
-        <td class="span2" data-l="Trade"><span class="coin">${esc(t.coin || '—')}</span> ${side ? `<span class="side-pill ${side === 'short' ? 'short' : 'long'}">${esc(side.toUpperCase())}</span>` : ''}${t.reason ? `<div class="small muted trade-detail clamp" title="${esc(t.reason)}">${esc(t.reason)}</div>` : ''}</td>
-        <td class="nowrap" data-l="By"><span class="by-pill ${who}" title="rejected by ${esc(who === 'other' ? 'unknown' : (REJECTERS.find((r) => r[0] === who) || [])[2])}">${esc(BY_SHORT[who] || (t.by ? String(t.by) : '?'))}</span></td>
-        <td data-l="Status"><span class="st-pill ${stCls}">${esc(st)}</span></td>
-        <td class="r ${signClass(t.r)}" data-l="R">${t.r == null ? '<span class="muted">—</span>' : fmtR(t.r)}</td>
-        <td class="r" data-l="Entry · Stop · TP">${fmtPx(t.entry_px)}<br><span class="small"><span class="neg">${fmtPx(t.stop_px)}</span> · <span class="pos">${fmtPx(t.tp_px)}</span></span></td>
-        <td class="r" data-l="Conf">${t.confidence != null ? (t.confidence * 100).toFixed(0) + '%' : '—'}</td>
-      </tr>`;
-    }).join('') : emptyRow(7, all.length ? `No shadow trades rejected by ${byLabel} yet.` : 'No shadow trades — nothing has been rejected yet.');
-  }
-
   // -------------------------------------------------------------- render: risk / config
   const RISK_LABELS = {
     max_leverage: ['Max leverage', 'x'], max_position_pct_equity: ['Max position', '% eq'], max_gross_exposure_pct: ['Max gross exposure', '% eq'],
@@ -1678,17 +1724,15 @@
     // Isolated: a bad shadow-trades payload or a stale page must never blank the rest of the dashboard
     // (before this guard, one exception here also killed the demo fallback's renderAll — total wipeout).
     try {
-      renderShadowTrades();
+      renderShadowLearner();
     } catch (e) {
-      try { console.error('shadow-trades panel failed to render; hiding it', e); } catch (_) { /* noop */ }
+      try { console.error('shadow & learner panel failed to render; hiding it', e); } catch (_) { /* noop */ }
       const sp = $id('shadowtr-panel');
       if (sp) sp.hidden = true;
     }
     renderFeed();
     renderPerformance();
     renderExitQuality();
-    renderLearner();
-    renderLearnerExtras();
     renderConfig();
     markScrollable();
     listeners.status.forEach((cb) => { try { cb(state.status); } catch (_) { /* admin hook errors must not break the dashboard */ } });
@@ -1860,7 +1904,7 @@
     close_reason: ['Close reason', 'Why a trade ended. Stop = the loss cap was hit. Take-profit = the target was hit. Agent = the model chose to close it. Stale = closed because it sat too long without going anywhere.'],
     daily_pnl: ['Daily PnL', 'Equity change for each UTC day: green bars are days that ended up, red bars days that ended down. Hover a bar for the day\'s open → close and its low / high.'],
     rejection_scores: ['Rejection scoreboard', 'Three layers can block a trade the model proposes. The verifier is a second AI model that double-checks the idea. The risk gate applies hard limits (leverage, position count, stop distance, cooldowns). The RR model is the reward-to-risk check that demands enough upside for the risk taken. Every blocked trade is followed as a "shadow trade" that is never placed. "Would have lost" means blocking it saved money; "would have won" means it cost a winner. A layer that mostly blocks losers is EARNING its cost; one that mostly blocks winners is TOO STRICT. The All row combines every rejection.'],
-    shadow: ['Shadow trades', 'Trades that were rejected (by the verifier, the risk gate or the RR check), followed as if they had been taken so we can tell whether rejecting was right. By = who rejected it. open = still running; stopped = would have hit the stop; target = would have hit take-profit; expired = ran out of time. Use the chips to see one rejecter at a time.'],
+    shadow: ['Shadow trades', 'Trades that were rejected (by the verifier, the risk gate or the RR check), followed as if they had been taken so we can tell whether rejecting was right. By = who rejected it. open = still running; stopped = would have hit the stop; target = would have hit take-profit; expired = ran out of time. The Scoreboard tab tallies each rejecter; the Lessons tab shows what the learner took away.'],
     postmortem: ['Post-mortems', 'After a trade closes the model writes a short review: what it expected, what actually happened and the lesson. R is the result in risk units (-1R = the stop was hit). Lessons are fed back into future prompts.'],
   };
   const helpPop = $id('help-pop');
