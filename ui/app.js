@@ -894,13 +894,19 @@
     const st = (state.status && state.status.shadow_trades) || {};
     const open = Array.isArray(st.open) ? st.open.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
     const resolved = Array.isArray(st.resolved) ? st.resolved.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
+    // The served page may predate this panel (stale index.html cached against a newer app.js):
+    // if any of its elements are missing, skip quietly instead of throwing and killing renderAll.
     const panel = $id('shadowtr-panel');
+    if (!panel) return;
     panel.hidden = !open.length && !resolved.length;
     if (panel.hidden) return;
     const nowS = Date.now() / 1000;
 
-    $id('shadowtr-open-block').hidden = !open.length;
-    $id('shadowtr-open-table').querySelector('tbody').innerHTML = open.length ? open.map((t) => {
+    const openBlock = $id('shadowtr-open-block');
+    if (openBlock) openBlock.hidden = !open.length;
+    const openTable = $id('shadowtr-open-table');
+    const openBody = openTable && openTable.querySelector('tbody');
+    if (openBody) openBody.innerHTML = open.length ? open.map((t) => {
       const side = String(t.side || '').toLowerCase() === 'short' ? 'short' : 'long';
       const who = rejecterOf(t);
       // Reuse the positions' stop->TP track when we have mark+entry; else a compact text fallback.
@@ -921,6 +927,7 @@
     // Resolved strip: the last few finished simulations. \u2713 = the rejecter was right (r < 0, veto saved
     // money); \u2717 = it blocked a winner (r > 0).
     const strip = $id('shadowtr-resolved-strip');
+    if (!strip) return;
     const last = resolved.slice(0, 6);
     strip.hidden = !last.length;
     strip.innerHTML = last.length ? `<span class="watch-label">resolved</span>` + last.map((t) => {
@@ -1668,7 +1675,15 @@
     renderMarketBrief();
     renderChart();
     renderPositions();
-    renderShadowTrades();
+    // Isolated: a bad shadow-trades payload or a stale page must never blank the rest of the dashboard
+    // (before this guard, one exception here also killed the demo fallback's renderAll — total wipeout).
+    try {
+      renderShadowTrades();
+    } catch (e) {
+      try { console.error('shadow-trades panel failed to render; hiding it', e); } catch (_) { /* noop */ }
+      const sp = $id('shadowtr-panel');
+      if (sp) sp.hidden = true;
+    }
     renderFeed();
     renderPerformance();
     renderExitQuality();
