@@ -357,7 +357,9 @@ Judgement guide: breakeven is EARNED, not grabbed - a stop at/beyond entry is re
 candles: for a short, tighten only after a NEW LOWER HIGH forms on the 15m (mirror for longs) - "price moved my way"
 alone is not a reason to trail. NEVER tighten more than half the open book in one look: uniform tight stops on a
 correlated basket all die to the same bounce - stagger your trails across looks. Close on thesis break or momentum
-reversal instead of waiting for the stop. A STALL IS NOT A THESIS BREAK: dead momentum alone NEVER justifies an
+reversal instead of waiting for the stop. Closing a WINNER before +1R or its target needs the SAME closed-candle
+structure-break standard as any exit - "momentum softening" or a mixed 15m on a profitable trade is not a break;
+let the trailing rules and the target do their work. A STALL IS NOT A THESIS BREAK: dead momentum alone NEVER justifies an
 exit - a stalled position may only be closed when its age is within 20% of the {cfg.risk.max_position_age_hours}h
 limit AND momentum is dead on closed candles; otherwise hold it and let the stop do its job. A scalp that lost its
 15m trend (tf_align_15m false, trend_15m against you) is done.

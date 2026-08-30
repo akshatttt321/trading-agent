@@ -456,7 +456,9 @@ class Agent:
                 self.notify.send(f"REJECTED (manager) {a.kind} {a.coin or a.outcome or ''}: {verdict.reason}", "warning")
                 self.state.record_order(cycle_id, a.model_dump(), False, "manager: " + verdict.reason, {})
                 continue
-            if l.verify_loss_exits and self._is_loss_exit(verdict.action, snap):
+            if l.verify_loss_exits and verdict.action.kind in ("close_perp", "pm_sell", "spot_sell"):
+                # ALL manager closes are reviewed - a winner scratched early is as costly as a loser held late.
+                # (fail-open below: an outage never traps a position)
                 loss_exits.append((verdict.action, verdict.reason))
                 continue
             self._exec_managed(verdict.action, "manager: " + verdict.reason, cycle_id, prices)
@@ -1001,12 +1003,13 @@ class Agent:
                                                      f"RR {rr_v:.2f} (min {self.cfg.rr.min_reward_risk}), book {longs}L/{shorts}S]")
                 pending.append((va, f"{verdict.reason} | rr: {rrv.reason}", rrv.risk_usd))
                 continue
-            # risk-reducing actions (close / tighten stop / sell) execute immediately - rotations close first.
-            # Exception: exits that REALISE A LOSS are a judgement call -> reviewed by the verifier (fail-open).
+            # risk-reducing actions (tighten stop / update) execute immediately - rotations close first.
+            # Exception: ALL judgement closes (loss OR profit) are reviewed by the verifier (fail-open) -
+            # a winner scratched early costs as much as a loser held late; stops/TPs stay deterministic.
             if not verdict.approved:
                 _reject(a, verdict.reason, "risk_gate")
                 continue
-            if self.cfg.llm.verify_loss_exits and self._is_loss_exit(verdict.action, snap):
+            if self.cfg.llm.verify_loss_exits and verdict.action.kind in ("close_perp", "pm_sell", "spot_sell"):
                 loss_exits.append((verdict.action, verdict.reason))
                 continue
             _execute(verdict.action, verdict.reason, 0.0)
