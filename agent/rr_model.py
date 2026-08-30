@@ -59,13 +59,17 @@ class RiskRewardModel:
             risk_budget = min(kelly_risk_usd, max_risk_usd) * learner_mult
             size_cap = risk_budget / risk_frac
             orig = a.size_usd or 0
-            a.size_usd = round(min(orig, size_cap), 2)
+            # margin floor: every trade commits >= min_margin_usd of margin (notional = leverage x margin).
+            # Risk caps keep PRIMACY: the floor never overrides the risk budget or the per-position notional cap.
+            floor_usd = (a.leverage or 1) * self.cfg.risk.min_margin_usd
+            notional_cap = eq * self.cfg.risk.max_position_pct_equity / 100
+            a.size_usd = round(min(max(orig, floor_usd), size_cap, notional_cap), 2)
             risk_usd = a.size_usd * risk_frac
             note = f"RR={rr:.2f} p={p:.2f} EV={ev_r:.2f}R kelly_risk=${kelly_risk_usd:.0f} cap_risk=${max_risk_usd:.0f} learner x{learner_mult:.2f}"
             if a.size_usd < self.cfg.risk.min_order_usd:
                 return RRVerdict(False, f"sized below min order after RR model ({note})", a, risk_usd, rr, ev_r)
-            if a.size_usd < orig:
-                note = f"size ${orig:.0f}->${a.size_usd:.0f}; " + note
+            if abs(a.size_usd - orig) > 0.5:
+                note = f"size ${orig:.0f}->${a.size_usd:.0f}" + (" (margin floor)" if a.size_usd > orig else "") + "; " + note
             return RRVerdict(True, note, a, risk_usd, rr, ev_r)
 
         if a.kind == "pm_buy" and a.stop_loss_px is not None and a.take_profit_px is not None:
