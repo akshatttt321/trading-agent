@@ -1104,11 +1104,21 @@
   function classify(order) {
     if (!order) return 'pending';
     if (order.approved === false) return 'rejected';
-    if (order.result && order.result.ok === false) return 'failed';
-    if (order.result && order.result.ok) return 'filled';
+    if (order.result && order.result.ok === false) {
+      // A limit order that timed out or was canceled at its trigger never traded — soften it from FAILED.
+      const d = String(order.result.detail || '');
+      return /expired|canceled at trigger/i.test(d) ? 'canceled' : 'failed';
+    }
+    // ok=true with result.resting means the limit order is parked on the book — nothing has executed yet.
+    if (order.result && order.result.ok) return order.result.resting ? 'resting' : 'filled';
     return 'pending';
   }
-  const TAG_TEXT = { filled: 'FILLED', rejected: 'REJECTED', failed: 'FAILED', pending: 'PENDING', hold: 'HOLD', quiet: 'QUIET' };
+  const TAG_TEXT = { filled: 'FILLED', resting: 'RESTING', canceled: 'CANCELED', rejected: 'REJECTED', failed: 'FAILED', pending: 'PENDING', hold: 'HOLD', quiet: 'QUIET' };
+  const TAG_TITLE = {
+    resting: 'Limit order parked on the book, waiting for price to touch — nothing has executed yet',
+    canceled: 'Limit order expired or was canceled before filling — no trade happened',
+  };
+  function tagHTML(cls) { return `<span class="tag tag-${cls}"${TAG_TITLE[cls] ? ` title="${TAG_TITLE[cls]}"` : ''}>${TAG_TEXT[cls]}</span>`; }
 
   function actionKey(a) { return a ? [a.kind, a.coin || a.market_id || '', a.side || a.outcome || ''].join('|') : ''; }
 
@@ -1156,10 +1166,11 @@
     let why = '';
     if (cls === 'rejected') why = `<div class="action-why rej">${esc(order.risk_reason || 'rejected by risk gate')}</div>`;
     else if (cls === 'failed') why = `<div class="action-why fail">${esc((order.result && order.result.detail) || 'venue error')}${order.risk_reason ? `\n<span class="muted">${esc(order.risk_reason)}</span>` : ''}</div>`;
-    else if (cls === 'filled') why = `<div class="action-why ok">${esc((order.result && order.result.detail) || '')}${order.risk_reason ? `\n${esc(order.risk_reason)}` : ''}</div>`;
+    else if (cls === 'canceled') why = `<div class="action-why ok">${esc((order.result && order.result.detail) || 'limit order canceled unfilled')}${order.risk_reason ? `\n${esc(order.risk_reason)}` : ''}</div>`;
+    else if (cls === 'filled' || cls === 'resting') why = `<div class="action-why ok">${esc((order.result && order.result.detail) || '')}${order.risk_reason ? `\n${esc(order.risk_reason)}` : ''}</div>`;
     else if (cls === 'pending' && order && order.risk_reason) why = `<div class="action-why ok">${esc(order.risk_reason)}</div>`;
     return `<div class="action ${cls}" data-venue="${esc(actionVenue(a) || '')}">
-      <span class="tag-col"><span class="tag tag-${cls}">${TAG_TEXT[cls]}</span>${actionTypeTag(a)}</span>
+      <span class="tag-col">${tagHTML(cls)}${actionTypeTag(a)}</span>
       <div class="action-body">
         ${actionLine(a)}
         ${a && a.reason ? `<div class="action-reason">${esc(a.reason)}</div>` : ''}
@@ -1180,7 +1191,7 @@
     if (isQuiet(c)) return 'quiet';
     const orders = Array.isArray(c.orders) ? c.orders : [];
     const kinds = orders.map(classify);
-    if (kinds.some((k) => k === 'filled' || k === 'failed' || k === 'pending')) return 'trade';
+    if (kinds.some((k) => k === 'filled' || k === 'resting' || k === 'canceled' || k === 'failed' || k === 'pending')) return 'trade';
     if (kinds.some((k) => k === 'rejected')) return 'rejected';
     if (c.error) return 'error';
     return 'hold';
@@ -1211,8 +1222,9 @@
     let why = '';
     if (cls === 'rejected') why = String((order && order.risk_reason) || 'blocked by risk gate').replace(/^rejected:?\s*/i, '').split('|')[0].trim();
     else if (cls === 'failed') why = (order && order.result && order.result.detail) || 'venue error';
+    else if (cls === 'resting' || cls === 'canceled') why = (order && order.result && order.result.detail) || '';
     else if (cls === 'hold') why = (a && a.reason) || '';
-    return `<span class="tag tag-${cls}">${TAG_TEXT[cls]}</span><span class="sum-text">${esc(bits.join(' '))}${why ? `<span class="sum-why">${bits.length ? ' · ' : ''}${esc(why.length > 70 ? why.slice(0, 68) + '…' : why)}</span>` : ''}</span>`;
+    return `${tagHTML(cls)}<span class="sum-text">${esc(bits.join(' '))}${why ? `<span class="sum-why">${bits.length ? ' · ' : ''}${esc(why.length > 70 ? why.slice(0, 68) + '…' : why)}</span>` : ''}</span>`;
   }
 
   // Empty-state copy per venue+kind combination.

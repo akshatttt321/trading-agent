@@ -232,6 +232,25 @@
         push(a, true, 'approved (risk-reducing)', true, 'paper close long 1120 DOGE @ 0.1441 (pnl +$6.42, fee $0.06)');
         break;
       }
+      case 'resting': {   // ENTRY: limit order parked on the book — approved and placed, but NOT executed yet
+        const a = mkOpen('SOL', 'short', 0.62);
+        a.order_type = 'limit';
+        a.limit_price = round(px.SOL * 1.015, 3);
+        a.reason = 'Fade the squeeze: park a limit above spot and wait for the retest.';
+        push(a, true, 'approved | rr: RR=1.92 EV=+0.21R kelly=0.13 | limit resting',
+          true, `resting limit short SOL @ ${a.limit_price}`);
+        orders[orders.length - 1].result.resting = true;
+        break;
+      }
+      case 'expire': {   // limit order that sat unfilled and expired — canceled, no trade happened
+        const a = mkOpen('AVAX', 'long', 0.58);
+        a.order_type = 'limit';
+        a.limit_price = round(px.AVAX * 0.985, 3);
+        a.reason = 'Bid the pullback into support with a resting limit.';
+        push(a, true, 'approved | rr: RR=1.71 EV=+0.14R kelly=0.11 | limit resting',
+          false, 'expired after 90m unfilled');
+        break;
+      }
       case 'stop': {   // MANAGEMENT: update_stop — trail the stop and lift the target on an open perp
         const a = { kind: 'update_stop', coin: 'BTC', stop_loss_px: 77200, take_profit_px: 82600, reason: 'Trail stop to lock in 0.5R and extend the target.', confidence: 0.65 };
         push(a, true, 'approved (risk-reducing)', true, 'BTC: stop 76800 -> 77200, target 81500 -> 82600');
@@ -243,6 +262,8 @@
       reject: { verdict: 'concern', comment: 'Reward-to-risk looks thin for this volatility and the invalidation level is arbitrary. I would not take this trade at the proposed size.' },
       pmreject: { verdict: 'concern', comment: 'The probability edge here is inside the noise and PM exposure is already near the cap. Skip until the market misprices further.' },
       fail: { verdict: 'approve', comment: 'Reasonable continuation setup; approve. Note margin is getting tight, so a smaller size would be safer.' },
+      resting: { verdict: 'approve', comment: 'Passive entry at a better price is sensible here; the limit is close enough to touch. Approve.' },
+      expire: { verdict: 'approve', comment: 'The level was fine but price never came back; letting the unfilled limit expire costs nothing.' },
       pm: { verdict: 'approve', comment: 'The probability estimate is defensible given the current spot price and remaining time; edge clears the threshold.' },
       pmupd: { verdict: 'approve', comment: 'Raising the stop to break-even on a PM swing that has moved in your favour is prudent. Approve.' },
       spotbuy: { verdict: 'approve', comment: 'A small spot core against buyback flow is reasonable and well within the position cap. Approve.' },
@@ -316,7 +337,7 @@
   // (fill=open_perp, pm, spotbuy) and position updates (stop=update_stop, pmupd, close, spotsell) plus
   // rejections / failures — so both the New and Updates chips populate in demo mode.
   // The three back-to-back 'quiet's at the start guarantee the 'All' view's collapsed quiet-run row is visible in demo mode.
-  const SCENARIOS = ['hold', 'quiet', 'quiet', 'quiet', 'fill', 'reject', 'stop', 'pm', 'hold', 'close', 'quiet', 'fail', 'pmupd', 'hold', 'pmreject', 'quiet', 'spotbuy', 'reject', 'fill', 'quiet', 'stop', 'hold', 'pm', 'quiet', 'spotsell', 'close', 'pmreject', 'hold', 'quiet', 'fill', 'llmerr', 'hold', 'quiet', 'pmupd'];
+  const SCENARIOS = ['hold', 'quiet', 'quiet', 'quiet', 'fill', 'reject', 'stop', 'pm', 'hold', 'close', 'quiet', 'fail', 'pmupd', 'hold', 'pmreject', 'quiet', 'spotbuy', 'resting', 'expire', 'reject', 'fill', 'quiet', 'stop', 'hold', 'pm', 'quiet', 'spotsell', 'close', 'pmreject', 'hold', 'quiet', 'fill', 'llmerr', 'hold', 'quiet', 'pmupd'];
   const cycles = [];
   // Keep a deep enough pool (~240 cycles) that every kind filter can fill its 30 rows in demo mode.
   const CYCLE_POOL = 240;
