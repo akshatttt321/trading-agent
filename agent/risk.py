@@ -282,6 +282,21 @@ class RiskGate:
                 if waking < 1.5:
                     left = self.r.reentry_cooldown_min - (time.time() - blocks[bkey]) / 60
                     return Verdict(False, f"re-entry cooldown: {a.coin} {a.side} stopped out recently - {left:.0f}m left (a wake-up overrides)", a)
+            # verifier-veto cooldown: the verifier's judgment stands - re-proposing the same coin+side minutes later
+            # pays ~$0.01 for the same answer. Reject it here for FREE until the window passes.
+            if self.r.veto_cooldown_min and a.kind == "open_perp":
+                import json as _json
+                cut = cycle_start_ts - self.r.veto_cooldown_min * 60
+                for vts, va in self.state.db.execute(
+                        "SELECT ts, action FROM orders WHERE approved=0 AND ts > ? AND risk_reason LIKE 'VERIFIER:%'", (cut,)).fetchall():
+                    try:
+                        vad = _json.loads(va)
+                    except Exception:
+                        continue
+                    if vad.get("kind") == "open_perp" and vad.get("coin") == a.coin and vad.get("side") == a.side:
+                        ago = (cycle_start_ts - vts) / 60
+                        return Verdict(False, f"veto cooldown: verifier rejected {a.coin} {a.side} {ago:.0f}m ago - "
+                                              f"blocked free for {self.r.veto_cooldown_min}m (address the veto reason or wait)", a)
             # chop-regime entry budget, SCOPED: chop is where stop-out churn happens, but (a) PM buys never count,
             # (b) a coin trending cleanly in the trade's direction (1h structure + 15m agree) is exempt - trend-following
             # on a trending coin is not chop churn even when BTC is indecisive, (c) only counter-trend perp entries

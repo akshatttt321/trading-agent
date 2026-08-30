@@ -164,6 +164,7 @@ class RiskCfg(BaseModel):
     chop_max_entries_per_day: int = 2
     limit_order_ttl_min: int = 180           # resting limit entries auto-cancel if unfilled after this
     min_position_age_min: int = 15           # manager may not close a younger position unless it is already down 0.5R
+    veto_cooldown_min: int = 45              # a verifier-vetoed coin+side cannot be re-proposed (free gate reject) for this long
     max_resting_orders: int = 3
     beta_weighted_risk: bool = True
 
