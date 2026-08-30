@@ -580,6 +580,23 @@ class Agent:
                     self.notify.send(f"CANCELED limit {a.side} {a.coin} @ {a.limit_price}: unfilled for {self.cfg.risk.limit_order_ttl_min}m", "info")
                     continue
                 hit = px and ((a.side == "long" and px <= a.limit_price) or (a.side == "short" and px >= a.limit_price))
+                if not hit and px and self.cfg.mode == "paper":
+                    # WICK FILL: a real venue fills a resting maker order the instant any trade crosses it - a dip
+                    # lasting seconds BETWEEN 30s ticks must fill here too, or paper under-fills vs live. Check the
+                    # 1m candle extremes since the last look (capped 5m) and fill at the limit price (maker).
+                    try:
+                        w0 = max(r.get("wick_ts") or r["ts"], time.time() - 300)
+                        ks = self.md.info.candles_snapshot(a.coin, "1m", int(w0 * 1000), int(time.time() * 1000))
+                        r["wick_ts"] = time.time()
+                        if ks:
+                            lo = min(float(k["l"]) for k in ks)
+                            hi = max(float(k["h"]) for k in ks)
+                            if (a.side == "long" and lo <= a.limit_price) or (a.side == "short" and hi >= a.limit_price):
+                                hit = True
+                                px = a.limit_price               # maker fill at the limit, as the venue would
+                                log.info(f"[dim]wick fill: {a.coin} 1m {'low ' + str(lo) if a.side == 'long' else 'high ' + str(hi)} crossed limit {a.limit_price}[/]")
+                    except Exception:
+                        pass
                 if not hit:
                     continue
 
