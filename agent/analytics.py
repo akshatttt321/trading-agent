@@ -112,6 +112,44 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
         else:
             rej_by["other"] += 1
 
+    # confidence calibration: stated entry confidence vs realized outcome.
+    # Samples = real closed trades (entry matched to its close per coin/token, LIFO) + resolved shadow trades.
+    cal_rows = c.execute("SELECT ts, action, result FROM orders WHERE approved=1 ORDER BY ts").fetchall()
+    pending_cal: Dict[str, list] = {}
+    cal_samples = []
+    for r_ in cal_rows:
+        a_ = _j(r_["action"], {}) or {}
+        res_ = _j(r_["result"], {}) or {}
+        raw_ = res_.get("raw") or {}
+        key_ = a_.get("token_id") or a_.get("coin")
+        if not key_:
+            continue
+        if a_.get("kind") in ("open_perp", "spot_buy", "pm_buy") and res_.get("ok") and not res_.get("resting"):
+            pending_cal.setdefault(key_, []).append(a_)
+        elif res_.get("ok") and raw_.get("realized_pnl") is not None and not raw_.get("partial"):
+            stack = pending_cal.get(key_) or []
+            if stack:
+                ent = stack.pop()
+                if ent.get("confidence"):
+                    cal_samples.append({"conf": float(ent["confidence"]), "win": float(raw_["realized_pnl"]) > 0, "src": "real"})
+    try:
+        shrow = c.execute("SELECT value FROM meta WHERE key='shadow_trades'").fetchone()
+        for t_ in (_j(shrow[0], []) if shrow else []) or []:
+            if t_.get("status") in ("stopped", "target", "expired") and t_.get("confidence") and t_.get("r") is not None:
+                cal_samples.append({"conf": float(t_["confidence"]), "win": float(t_["r"]) > 0, "src": "shadow"})
+    except Exception:
+        pass
+    cal_buckets = []
+    for lo, hi in ((0.0, 0.55), (0.55, 0.60), (0.60, 0.65), (0.65, 0.70), (0.70, 1.01)):
+        ss = [x for x in cal_samples if lo <= x["conf"] < hi]
+        if not ss:
+            continue
+        wr = sum(1 for x in ss if x["win"]) / len(ss)
+        mid = (lo + min(hi, 1.0)) / 2
+        cal_buckets.append({"bucket": f"{lo:.2f}-{min(hi, 1.0):.2f}", "n": len(ss),
+                            "real_n": sum(1 for x in ss if x["src"] == "real"),
+                            "stated_mid": round(mid, 3), "win_rate": round(wr, 3), "gap": round(wr - mid, 3)})
+
     # equity per UTC day
     daily: Dict[str, Dict[str, float]] = {}
     for r in eq_rows:
@@ -140,6 +178,9 @@ def compute(c: sqlite3.Connection, cfg: Config) -> Dict[str, Any]:
             "by_venue": by_venue, "by_coin": by_coin, "by_close_reason": by_close,
             "recent": list(reversed(trades[-20:])),
         },
+        "calibration": {"samples": len(cal_samples), "real": sum(1 for x in cal_samples if x["src"] == "real"),
+                        "shadow": sum(1 for x in cal_samples if x["src"] == "shadow"), "buckets": cal_buckets,
+                        "note": "win_rate vs stated confidence; negative gap = overconfident at that level"},
         "activity": {"cycles": len(cyc), "quiet_skipped": skipped, "proposer_failures": failed, "trade_proposals": proposed,
                      "rejected": len(rejected), "rejected_by": rej_by, "approved_orders": len([1 for o in orders if o["approved"]]),
                      "fills": sum(1 for o in orders if o["approved"] and (_j(o["result"], {}) or {}).get("ok") and not (_j(o["result"], {}) or {}).get("resting"))},
