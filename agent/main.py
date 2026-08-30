@@ -328,7 +328,9 @@ class Agent:
             st, why = trend_strength(market, side)
             ladder = r.same_direction_caps or [3]
             cap = ladder[min(st, len(ladder) - 1)]
-            out[f"{side}s"] = {"held": held, "allowed": cap, "room": max(cap - len(held), 0), "trend_strength": f"{st}/4", "why": why}
+            out[f"{side}s"] = {"held": held, "allowed": cap, "room": max(cap - len(held), 0),
+                               "trend_strength": f"{st}/4" + (" (ZERO = no market-wide conviction either way, NOT a bias against this side - judge the coin)" if st == 0 else ""),
+                               "why": why}
         u = self.cfg.universe
         if u.buckets:
             out["buckets"] = {}
