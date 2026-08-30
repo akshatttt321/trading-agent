@@ -162,7 +162,7 @@ class RiskCfg(BaseModel):
     scale_out_r: float = 1.5
     scale_out_frac: float = 0.5
     chop_max_entries_per_day: int = 2
-    limit_order_ttl_min: int = 90            # resting limit entries auto-cancel if unfilled after this
+    limit_order_ttl_min: int = 180           # resting limit entries auto-cancel if unfilled after this
     min_position_age_min: int = 15           # manager may not close a younger position unless it is already down 0.5R
     max_resting_orders: int = 3
     beta_weighted_risk: bool = True
