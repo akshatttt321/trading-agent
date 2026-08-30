@@ -446,7 +446,12 @@ class Brain:
                           "quality, entry timing. "
                           "For LOSS-REALISING EXITS specifically: closing a position under ~1h old, or justified by the "
                           "live candle, or by momentum-in-the-trade's-favor readings ('oversold' on a short / 'overbought' "
-                          "on a long), is CHURN - veto it unless the reason names a closed-candle structure break.\n" + json.dumps(proposal, separators=(",", ":")))
+                          "on a long), is CHURN - veto it unless the reason names a closed-candle structure break. "
+                          "CORRELATION IS SYMMETRIC: three correlated LONGS plus a fourth is the same concentration trap "
+                          "as four correlated shorts - apply the same veto standard to long baskets. "
+                          "SCALE-INS: adding to a WINNING position is legitimate - approve it when the combined position "
+                          "stays protected (stop at/beyond the original entry) AND stated confidence is >= 0.80; below "
+                          "0.80 confidence, veto the add. Adding to a LOSING position is never acceptable.\n" + json.dumps(proposal, separators=(",", ":")))
         c = self._call(self.verifier, self.verifier_system, msg, VERDICT_SCHEMA, "submit_verdicts")
         self.last_verify_failed = bool(c.error or not c.data)
         if c.error or not c.data:
