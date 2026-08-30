@@ -977,6 +977,13 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 .ctx-mult { color: var(--text-2); }
 .shl-more { margin-top: 6px; align-self: flex-start; background: transparent; border: 1px solid var(--border); color: var(--text-2); font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; cursor: pointer; }
 .shl-more:hover { border-color: var(--border-strong); color: var(--text); }
+/* confidence calibration (lessons tab) */
+.cal-caption { margin: 8px 0 6px; }
+.cal-wrap { max-width: 480px; }
+.cal-tbl th, .cal-tbl td { padding: 5px 9px; }
+.cal-tbl td { font-size: 12px; }
+.cal-sum { margin: 6px 0 12px; font-family: var(--mono); font-size: 11px; }
+.cal-warn { color: var(--warn); }
 @media (max-width: 640px) {
   .rej-cards { grid-template-columns: 1fr; }
   .ctx-meta { margin-left: 0; white-space: normal; flex-basis: 100%; }

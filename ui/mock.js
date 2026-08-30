@@ -856,6 +856,16 @@
         note: 'pnl_per_llm_usd < 1 means the model costs more than it earns',
       },
       daily: order.map((d) => byDay[d]),
+      calibration: {
+        samples: 23, real: 14, shadow: 9,
+        buckets: [
+          { bucket: '0.55-0.60', n: 6, real_n: 4, stated_mid: 0.575, win_rate: 0.5, gap: -0.075 },
+          { bucket: '0.60-0.65', n: 8, real_n: 5, stated_mid: 0.625, win_rate: 0.375, gap: -0.25 },
+          { bucket: '0.65-0.70', n: 5, real_n: 3, stated_mid: 0.675, win_rate: 0.8, gap: 0.125 },
+          { bucket: '0.70-0.75', n: 4, real_n: 2, stated_mid: 0.725, win_rate: 0.75, gap: 0.025 },
+        ],
+        note: 'win_rate vs stated confidence; negative gap = overconfident at that level',
+      },
       paper_assumptions: config.mode === 'paper' ? { fee_bps: 4.5, slippage_bps: 8 } : null,
     };
   }

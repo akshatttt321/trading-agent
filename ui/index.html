@@ -224,6 +224,18 @@
       <div id="shl-ctx-block" hidden>
         <div id="shl-ctx-list" class="ctx-list"></div>
       </div>
+      <!-- Confidence calibration (GET /api/analytics `calibration`) -->
+      <div id="shl-cal-block" hidden>
+        <h3 class="sub-head">Confidence calibration</h3>
+        <div class="muted small cal-caption">when the model says X, how often is it actually right &mdash; negative gap = overconfident</div>
+        <div class="table-wrap cal-wrap">
+          <table class="tbl num-tbl cal-tbl" id="shl-cal-table">
+            <thead><tr><th>Stated</th><th class="r">Trades</th><th class="r">Actual win%</th><th class="r">Gap</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="shl-cal-sum" class="muted small cal-sum"></div>
+      </div>
       <div id="shl-lessons-block" hidden>
         <h3 class="sub-head">Lessons fed to the LLM</h3>
         <pre id="lessons" class="lessons">&mdash;</pre>

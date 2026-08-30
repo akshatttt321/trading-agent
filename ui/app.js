@@ -921,10 +921,14 @@
     const pms = Array.isArray(L.postmortems) ? L.postmortems.slice().sort((a, b) => n0(b.ts) - n0(a.ts)) : [];
     const lessonsTxt = typeof L.lessons === 'string' ? L.lessons.trim() : '';
     const openScored = Array.isArray(L.open) ? L.open : [];
+    // Confidence calibration lives in GET /api/analytics (`calibration`), not /api/learner. The API already
+    // omits empty buckets, but filter defensively so a zero-n bucket can't render a blank row.
+    const calib = state.analytics && state.analytics.calibration && typeof state.analytics.calibration === 'object' ? state.analytics.calibration : null;
+    const calibBuckets = calib && Array.isArray(calib.buckets) ? calib.buckets.filter((b) => n0(b.n) > 0) : [];
 
     const hasLive = open.length > 0 || resolved.length > 0;
     const hasScore = !!rs;
-    const hasLessons = ctxs.length > 0 || pms.length > 0 || !!lessonsTxt || openScored.length > 0;
+    const hasLessons = ctxs.length > 0 || pms.length > 0 || !!lessonsTxt || openScored.length > 0 || calibBuckets.length > 0;
     panel.hidden = !hasLive && !hasScore && !hasLessons;
     if (panel.hidden) return;
 
@@ -942,7 +946,7 @@
 
     renderShadowLive(open, resolved);
     renderRejScoreboard(rs);
-    renderLearnerLessons(ctxs, pms, lessonsTxt, openScored);
+    renderLearnerLessons(ctxs, pms, lessonsTxt, openScored, calib, calibBuckets);
   }
 
   // View 1: the open-shadows ghost table + resolved strip (behavior unchanged from the old panel).
@@ -1022,12 +1026,54 @@
     }).join('');
   }
 
+  // Confidence calibration (GET /api/analytics `calibration`): when the model states a confidence bucket,
+  // how often is it actually right? negative gap = overconfident. Returns true when the block is shown, so
+  // the Lessons tab counts as non-empty even when the learner itself has nothing yet.
+  function renderCalibration(calib, buckets) {
+    const block = $id('shl-cal-block');
+    if (!block) return false;  // served page predates the calibration skeleton
+    const body = block.querySelector('#shl-cal-table tbody');
+    const sum = $id('shl-cal-sum');
+    block.hidden = !buckets.length;
+    if (!buckets.length) { if (body) body.innerHTML = ''; if (sum) sum.innerHTML = ''; return false; }
+    // red = overconfident by more than 10 pts at that stated level, green = at or above what it claimed.
+    const gapCls = (g) => g == null || isNaN(g) ? '' : g < -0.10 ? 'neg' : g >= 0 ? 'pos' : '';
+    if (body) body.innerHTML = buckets.map((b) => {
+      const nb = n0(b.n);
+      const realN = b.real_n != null && !isNaN(b.real_n) ? n0(b.real_n) : null;
+      const split = realN != null ? `${realN} real + ${Math.max(0, nb - realN)} shadow` : `${nb} trades`;
+      const wr = b.win_rate != null && !isNaN(b.win_rate) ? Math.round(Number(b.win_rate) * 100) : null;
+      const gap = b.gap != null && !isNaN(b.gap) ? Number(b.gap) : null;
+      const cls = gapCls(gap);
+      return `<tr>
+        <td data-l="Stated">${esc(b.bucket == null ? '?' : String(b.bucket))}</td>
+        <td class="r" data-l="Trades" title="${esc(split)}">${nb}</td>
+        <td class="r ${cls}" data-l="Actual win%" title="realized win rate of the ${esc(split)} at this stated confidence">${wr != null ? wr + '%' : '\u2014'}</td>
+        <td class="r ${cls}" data-l="Gap" title="actual win rate minus stated confidence; negative = overconfident">${gap != null ? (gap > 0 ? '+' : '') + (gap * 100).toFixed(1) + '%' : '\u2014'}</td>
+      </tr>`;
+    }).join('');
+    if (sum) {
+      const samples = calib && calib.samples != null && !isNaN(calib.samples) ? n0(calib.samples) : buckets.reduce((a, b) => a + n0(b.n), 0);
+      const split = calib && calib.real != null && calib.shadow != null ? ` (${n0(calib.real)} real + ${n0(calib.shadow)} shadow)` : '';
+      let worst = null;  // most overconfident bucket beyond the -10 pt threshold
+      for (const b of buckets) { const g = Number(b.gap); if (!isNaN(g) && g < -0.10 && (worst == null || g < worst.g)) worst = { b, g }; }
+      if (samples >= 8 && worst) {
+        const wwr = Math.round(n0(worst.b.win_rate) * 100), pts = Math.round(-worst.g * 100);
+        sum.innerHTML = `${samples} samples${esc(split)} &middot; <span class="cal-warn">&#9888; at stated ${esc(worst.b.bucket == null ? '?' : String(worst.b.bucket))} it wins only ${wwr}% &mdash; overconfident by ${pts} pts</span>`;
+      } else {
+        sum.innerHTML = `collecting data &mdash; ${samples} sample${samples === 1 ? '' : 's'} so far`;
+      }
+    }
+    return true;
+  }
+
   // View 3: what the learner has extracted - setup scores, the lessons text fed to the LLM, post-mortems.
   const SHL_CTX_N = 6, SHL_PM_N = 3;
-  function renderLearnerLessons(ctxs, pms, lessonsTxt, openScored) {
+  function renderLearnerLessons(ctxs, pms, lessonsTxt, openScored, calib, calibBuckets) {
     const block = $id('shl-ctx-block');
     if (!block) return;
-    const any = ctxs.length > 0 || pms.length > 0 || !!lessonsTxt || openScored.length > 0;
+    const calShown = renderCalibration(calib, calibBuckets || []);
+    const any = ctxs.length > 0 || pms.length > 0 || !!lessonsTxt || openScored.length > 0 || calShown;
     const emptyEl = $id('shl-lessons-empty');
     if (emptyEl) emptyEl.hidden = any;
 
