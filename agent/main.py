@@ -496,8 +496,14 @@ class Agent:
 
     def _place_resting(self, act: Action, reason: str, risk_usd: float, regime: str, view: str, cycle_id: int) -> None:
         """Park a gate/verifier/RR-approved limit entry; the 30s tick fills or expires it."""
-        rest = [r for r in (self.state.get("resting_orders") or [])
-                if not (r["action"].get("coin") == act.coin and r["action"].get("side") == act.side)]   # cancel-replace
+        prev = self.state.get("resting_orders") or []
+        rest = []
+        for r in prev:                                          # cancel-replace, journaled so the feed shows the old order's fate
+            if r["action"].get("coin") == act.coin and r["action"].get("side") == act.side:
+                self.state.record_order(cycle_id, r["action"], True, "limit replaced by newer proposal",
+                                        {"ok": False, "detail": f"replaced by new limit @ {act.limit_price}"})
+            else:
+                rest.append(r)
         if len(rest) >= self.cfg.risk.max_resting_orders:
             self.state.record_order(cycle_id, act.model_dump(), False, f"max {self.cfg.risk.max_resting_orders} resting orders", {})
             self.notify.send(f"REJECTED limit {act.coin}: max {self.cfg.risk.max_resting_orders} resting orders", "warning")
