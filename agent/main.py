@@ -1046,7 +1046,8 @@ class Agent:
             if not recheck.approved:
                 _reject(act, recheck.reason, "risk_gate")
                 continue
-            _execute(recheck.action, pending[i][1], pending[i][2])
+            reason_x = pending[i][1] + (f" | recheck: {recheck.reason}" if "->" in (recheck.reason or "") else "")
+            _execute(recheck.action, reason_x, pending[i][2])
 
         self._account_tokens()
         if not pm_scope:                                      # a PM review says nothing about perp-market quietness
