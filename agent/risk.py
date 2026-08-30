@@ -316,10 +316,18 @@ class RiskGate:
             md = ((market or {}).get("perps", {}) or {}).get(a.coin) or {}
             bb, rsi = md.get("bb_pos_1h"), md.get("rsi14_1h")
             if self.r.anti_chase_bb and bb is not None and rsi is not None:
-                if a.side == "long" and bb > self.r.anti_chase_bb and rsi > self.r.anti_chase_rsi:
-                    return Verdict(False, f"chasing: {a.coin} at top of band (bb {bb:.2f} > {self.r.anti_chase_bb}, RSI {rsi:.0f} > {self.r.anti_chase_rsi:.0f}) - re-propose as order_type=limit at the pullback (EMA20/SMA50 zone) instead of skipping", a)
-                if a.side == "short" and bb < (1 - self.r.anti_chase_bb) and rsi < (100 - self.r.anti_chase_rsi):
-                    return Verdict(False, f"chasing: {a.coin} at bottom of band (bb {bb:.2f}, RSI {rsi:.0f}) - re-propose as order_type=limit at the bounce level instead of skipping", a)
+                # a RESTING pullback limit is NOT a chase: it only fills after price retraces to it. Exempt limits
+                # parked >= 0.5x 1h-ATR on the pullback side of the mark; near-market limits still count as chasing.
+                mark_c = md.get("mark")
+                atr_c = md.get("atr14_1h_pct") or 1.0
+                pullback_limit = bool(a.order_type == "limit" and a.limit_price and mark_c and (
+                    (a.side == "long" and a.limit_price <= mark_c * (1 - 0.005 * atr_c)) or
+                    (a.side == "short" and a.limit_price >= mark_c * (1 + 0.005 * atr_c))))
+                if not pullback_limit:
+                    if a.side == "long" and bb > self.r.anti_chase_bb and rsi > self.r.anti_chase_rsi:
+                        return Verdict(False, f"chasing: {a.coin} at top of band (bb {bb:.2f} > {self.r.anti_chase_bb}, RSI {rsi:.0f} > {self.r.anti_chase_rsi:.0f}) - re-propose as order_type=limit resting >=0.5xATR below the mark (EMA20/SMA50 zone)", a)
+                    if a.side == "short" and bb < (1 - self.r.anti_chase_bb) and rsi < (100 - self.r.anti_chase_rsi):
+                        return Verdict(False, f"chasing: {a.coin} at bottom of band (bb {bb:.2f}, RSI {rsi:.0f}) - re-propose as order_type=limit resting >=0.5xATR above the mark (bounce zone)", a)
             # initial stop must clear normal noise: >= min_entry_stop_atr_mult x 1h ATR from current price
             atr_e = md.get("atr14_1h_pct")
             ref_e = next((pp.mark_px for pp in snap.perps if pp.coin == a.coin), None)
