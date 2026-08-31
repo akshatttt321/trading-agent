@@ -7,7 +7,7 @@
   <title>Trading Agent</title>
   <script>try{var t=localStorage.getItem('theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1115'/%3E%3Cpolyline points='4,24 11,17 16,20 22,10 28,13' fill='none' stroke='%233987e5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20260831b">
 </head>
 <body>
 
@@ -368,8 +368,13 @@
     <div class="muted small rb-caption">Deterministic pullback strategy (no LLM) — same $300, same prices, zero cost. A/B benchmark.</div>
 
     <!-- Architecture race: LLM book vs rule book vs proposer-only counterfactual (status.proposer_book).
-         Fixed order, never sorted; rendered by renderRuleBook() → renderArchRace() in app.js. -->
+         Fixed order, never sorted; rendered by renderRuleBook() → renderArchRace() in app.js.
+         The cards double as tabs: clicking one shows that book's detail view below the strip
+         (race-detail-rule / race-detail-llm / race-detail-prop; renderRaceDetail in app.js). -->
     <div id="arch-race" class="arch-race" hidden></div>
+
+    <!-- detail view: rule book (default tab) — the pre-existing tables, shown/hidden by the race tabs -->
+    <div id="race-detail-rule">
 
     <h3 class="sub-head">Open positions <span class="count" id="rb-pos-count"></span></h3>
     <div class="table-wrap">
@@ -397,6 +402,13 @@
       </table>
     </div>
     <div id="rb-trades-sum" class="muted small"></div>
+    </div>
+
+    <!-- detail view: LLM book — open perps + PM positions from status.snapshot (renderRaceLLM in app.js) -->
+    <div id="race-detail-llm" hidden></div>
+
+    <!-- detail view: proposer-only counterfactual — absorbed verifier vetoes from status.shadow_trades (renderRaceProp) -->
+    <div id="race-detail-prop" hidden></div>
   </section>
 
   <!-- Panel 4: decision feed -->
@@ -618,8 +630,8 @@
 <div id="help-pop" class="help-pop" hidden role="tooltip"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
-<script src="mock.js"></script>
-<script src="app.js"></script>
+<script src="mock.js?v=20260831b"></script>
+<script src="app.js?v=20260831b"></script>
 <script src="admin.js"></script>
 </body>
 </html>

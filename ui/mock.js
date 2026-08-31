@@ -537,6 +537,8 @@
         open: [
           shadowOpen('DOGE', 'long', 0.1390, 0.1330, 0.1530, 45, 'verifier',
             'Verifier: breakout not confirmed - OI flat and funding already elevated; chasing here risks a fakeout above range highs.', t - 4700),
+          shadowOpen('ETH', 'short', 3435, 3520, 3210, 50, 'verifier',
+            'Verifier: shorting into rising OI with funding barely positive - no confirmed rejection at the level yet.', t - 8600),
           shadowOpen('LINK', 'long', 15.6, 14.9, 17.2, 60, 'risk_gate',
             'Risk gate: max_open_positions (4) reached and stop distance 4.5% leaves too little room after the cooldown window.', t - 12400),
           shadowOpen('SUI', 'short', 1.94, 2.02, 1.72, 30, 'rr_model',
@@ -545,6 +547,7 @@
         resolved: [
           { coin: 'PENGU', side: 'short', entry_px: 0.0312, stop_px: 0.0331, tp_px: 0.0268, by: 'verifier', status: 'stopped', r: -1.0, ts: round(t - 31000, 1) },
           { coin: 'AVAX', side: 'long', entry_px: 23.4, stop_px: 22.6, tp_px: 25.1, by: 'risk_gate', status: 'target', r: 2.1, ts: round(t - 52000, 1) },
+          { coin: 'SOL', side: 'long', entry_px: 164.8, stop_px: 160.1, tp_px: 176.2, by: 'verifier', status: 'target', r: 2.4, size_usd: 55, ts: round(t - 64000, 1) },
           { coin: 'ARB', side: 'short', entry_px: 0.744, stop_px: 0.771, tp_px: 0.688, by: 'rr_model', status: 'expired', r: 0.4, ts: round(t - 76000, 1) },
           { coin: 'HYPE', side: 'long', entry_px: 28.9, stop_px: 27.6, tp_px: 32.2, by: 'verifier', status: 'stopped', r: -1.0, ts: round(t - 103000, 1) },
         ],

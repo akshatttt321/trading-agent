@@ -1010,3 +1010,10 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 .race-eq { font-family: var(--mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); margin-top: 2px; }
 .race-mult { font-family: var(--mono); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .race-sub { margin-top: 3px; }
+/* race cards double as tabs: the selected book's detail view renders below the strip */
+.race-card { cursor: pointer; user-select: none; transition: border-color 0.15s ease, background 0.15s ease; }
+.race-card:hover { border-color: rgba(57,135,229,0.45); }
+.race-card:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.race-card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
+#race-detail-rule[hidden], #race-detail-llm[hidden], #race-detail-prop[hidden] { display: none; }
+.race-detail-note { margin: 6px 0 10px; }

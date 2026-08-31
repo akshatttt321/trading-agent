@@ -48,6 +48,7 @@
     feedVenue: 'crypto',      // decision-feed top tab: crypto | pm
     feedKind: 'all',          // decision-feed sub-chip: all | new | updates | rejected | holds | quiet | errors
     shadowTab: 'live',        // shadow & learner panel view tab: live | scoreboard | lessons (survives re-render)
+    raceTab: 'rule',          // architecture race: which book's detail view is open (rule | llm | prop); JS-only, resets on reload
     shlCtxAll: false,         // lessons view: show all setup contexts (vs top 6)
     shlPmAll: false,          // lessons view: show all post-mortems (vs latest 3)
     feedOpen: new Set(),      // cycle ids the user expanded (survive re-render)
@@ -934,17 +935,149 @@
       const leaders = best != null ? cards.filter((c) => c.mult === best) : [];
       const leaderId = leaders.length === 1 ? leaders[0].id : null;   // tie or no data -> no badge
 
-      strip.innerHTML = cards.map((c) => `
-        <div class="race-card"${c.note ? ` title="${esc(c.note)}"` : ''}>
+      // The cards double as tabs: the selected book's detail view renders below the strip.
+      // Selection lives in state.raceTab only; if the selected book's card is absent (old payload
+      // without proposer_book, say) fall back to 'rule', then to the first card that exists.
+      if (!cards.some((c) => c.id === state.raceTab)) {
+        state.raceTab = cards.some((c) => c.id === 'rule') ? 'rule' : (cards[0] ? cards[0].id : 'rule');
+      }
+      strip.innerHTML = cards.map((c) => {
+        const on = c.id === state.raceTab;
+        const tip = (c.note ? c.note + ' \u2014 ' : '') + 'click to inspect this book';
+        return `
+        <div class="race-card${on ? ' active' : ''}" data-book="${c.id}" role="button" tabindex="0" aria-pressed="${on ? 'true' : 'false'}" title="${esc(tip)}">
           <div class="race-name">${c.name}${c.id === leaderId ? ' <span class="race-badge">leading</span>' : ''}</div>
           <div class="race-eq">${fmtUSD(c.equity)}</div>
           <div class="race-mult ${c.mult != null ? (c.mult >= 1 ? 'pos' : 'neg') : 'muted'}">${c.mult != null ? c.mult.toFixed(3) + 'x' : '\u2014'}</div>
           ${c.sub ? `<div class="race-sub muted small">${esc(c.sub)}</div>` : ''}
-        </div>`).join('');
+        </div>`;
+      }).join('');
       strip.hidden = cards.length === 0;
+      renderRaceDetail();
     } catch (e) {
       try { console.error('architecture race strip failed to render; hiding it', e); } catch (_) { /* noop */ }
       strip.hidden = true;
+      ['race-detail-llm', 'race-detail-prop'].forEach((id) => { const el = $id(id); if (el) el.hidden = true; });
+      const rd = $id('race-detail-rule');
+      if (rd) rd.hidden = false;   // fall back to the always-rendered rule tables
+    }
+  }
+
+  // -------------------------------------------------------------- render: race detail views (inside the rule-book panel)
+  // One full view per book under the race strip. The rule detail is the pre-existing tables
+  // (#race-detail-rule, rendered by renderRuleBook below); llm/prop are rendered here on demand.
+  // Clicking a card never changes data — only which detail is visible.
+  function renderRaceDetail() {
+    const sel = state.raceTab;
+    const rule = $id('race-detail-rule'), llm = $id('race-detail-llm'), prop = $id('race-detail-prop');
+    if (rule) rule.hidden = sel !== 'rule';
+    if (llm) llm.hidden = sel !== 'llm';
+    if (prop) prop.hidden = sel !== 'prop';
+    if (sel === 'llm') renderRaceLLM();
+    else if (sel === 'prop') renderRaceProp();
+  }
+
+  // LLM-book detail: open perps + PM positions from status.snapshot, plus a resting-orders one-liner.
+  // Every field is null-guarded; own try/catch hides only this section on a malformed payload.
+  function renderRaceLLM() {
+    const el = $id('race-detail-llm');
+    if (!el) return;   // stale cached index.html without the container: skip quietly
+    try {
+      const s = state.status || {};
+      const snap = s.snapshot && typeof s.snapshot === 'object' ? s.snapshot : {};
+      const perps = (Array.isArray(snap.perps) ? snap.perps : []).filter((p) => p && typeof p === 'object');
+      const pmPos = (Array.isArray(snap.pm) ? snap.pm : []).filter((m) => m && typeof m === 'object');
+      const resting = Array.isArray(s.resting_orders) ? s.resting_orders.length : 0;
+      const stopTp = (stop, tp) => `<span class="small">${stop != null ? `<span class="neg">stop ${fmtPx(stop)}</span>` : '<span class="muted">no stop</span>'} <span class="arrow">\u2192</span> ${tp != null ? `<span class="pos">tp ${fmtPx(tp)}</span>` : '<span class="muted">no tp</span>'}</span>`;
+      let html = `<h3 class="sub-head">Open perp positions <span class="count">${perps.length ? `(${perps.length})` : ''}</span></h3>
+        <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
+          <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">uPnL</th><th>Stop \u2192 TP</th>
+        </tr></thead><tbody>`;
+      html += perps.length ? perps.map((p) => {
+        // side: explicit field wins, else the sign of size (positive = long)
+        const side = p.side != null ? (String(p.side).toLowerCase() === 'short' ? 'short' : 'long')
+          : (typeof p.size === 'number' && p.size < 0 ? 'short' : 'long');
+        return `<tr>
+          <td data-l="Coin"><div class="coin">${esc(p.coin || '\u2014')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${typeof p.leverage === 'number' && !isNaN(p.leverage) ? ` <span class="muted">${p.leverage}x</span>` : ''}</div></td>
+          <td class="r" data-l="Entry">${fmtPx(p.entry_px)}</td>
+          <td class="r" data-l="Mark">${fmtPx(p.mark_px)}</td>
+          <td class="r ${signClass(p.unrealized_pnl)}" data-l="uPnL">${fmtUSD(p.unrealized_pnl, true)}</td>
+          <td data-l="Stop \u2192 TP">${stopTp(p.stop_px, p.tp_px)}</td>
+        </tr>`;
+      }).join('') : emptyRow(5, 'no open perp positions');
+      html += `</tbody></table></div>`;
+      if (pmPos.length) {
+        const ct = (v) => (typeof v === 'number' && !isNaN(v) ? (v * 100).toFixed(1) + '\u00A2' : '\u2014');
+        html += `<h3 class="sub-head">Prediction markets <span class="count">(${pmPos.length})</span></h3>
+          <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
+            <th>Market</th><th class="r">Cur</th><th>Stop \u2192 Target</th>
+          </tr></thead><tbody>` + pmPos.map((m) => {
+          const outNo = String(m.outcome || '').toLowerCase() === 'no';
+          const levels = m.stop_px == null && m.tp_px == null
+            ? '<span class="small muted">hold to resolution</span>'
+            : `<span class="small">${m.stop_px != null ? `<span class="neg">stop ${ct(m.stop_px)}</span>` : '<span class="muted">no stop</span>'} <span class="arrow">\u2192</span> ${m.tp_px != null ? `<span class="pos">target ${ct(m.tp_px)}</span>` : '<span class="muted">no target</span>'}</span>`;
+          return `<tr>
+            <td class="wrap" data-l="Market"><span class="side-pill ${outNo ? 'short' : 'long'}">${esc(m.outcome || '?')}</span> ${esc(m.question || '\u2014')}</td>
+            <td class="r" data-l="Cur">${ct(m.cur_price)}</td>
+            <td data-l="Stop \u2192 Target">${levels}</td>
+          </tr>`;
+        }).join('') + `</tbody></table></div>`;
+      }
+      html += `<div class="muted small race-detail-note">${resting ? `\u23F3 ${resting} resting limit order${resting === 1 ? '' : 's'} on the book` : 'no resting orders'}</div>`;
+      el.innerHTML = html;
+    } catch (e) {
+      try { console.error('LLM-book race detail failed to render; hiding it', e); } catch (_) { /* noop */ }
+      el.hidden = true;
+    }
+  }
+
+  // Proposer-only detail: the verifier vetoes this counterfactual book absorbed (status.shadow_trades
+  // entries with by=verifier since status.start_ts). live_r / r read from the vetoed trade's PoV:
+  // positive = the trade would be winning, i.e. the veto is costing the counterfactual book money.
+  function renderRaceProp() {
+    const el = $id('race-detail-prop');
+    if (!el) return;   // stale cached index.html without the container: skip quietly
+    try {
+      const s = state.status || {};
+      const st = s.shadow_trades && typeof s.shadow_trades === 'object' ? s.shadow_trades : {};
+      const since = typeof s.start_ts === 'number' && !isNaN(s.start_ts) ? s.start_ts : 0;
+      const isVeto = (t) => t && typeof t === 'object' && String(t.by || '').toLowerCase().indexOf('verifier') !== -1 && n0(t.ts) >= since;
+      const open = (Array.isArray(st.open) ? st.open : []).filter(isVeto).sort((a, b) => n0(b.ts) - n0(a.ts));
+      const resolved = (Array.isArray(st.resolved) ? st.resolved : []).filter(isVeto).sort((a, b) => n0(b.ts) - n0(a.ts));
+      const coinCell = (t) => {
+        const side = String(t.side || '').toLowerCase() === 'short' ? 'short' : 'long';
+        return `<span class="coin">${esc(t.coin || '\u2014')}</span> <span class="side-pill ${side}">${side.toUpperCase()}</span>${typeof t.size_usd === 'number' && !isNaN(t.size_usd) ? ` <span class="muted small">${fmtUSD(t.size_usd)}</span>` : ''}`;
+      };
+      let html = `<div class="muted small race-detail-note">= LLM book + every verifier-vetoed trade taken (counterfactual)</div>`;
+      if (!open.length && !resolved.length) {
+        html += `<div class="empty-state compact"><div class="empty-sub">no vetoes absorbed yet - proposer and verifier currently agree</div></div>`;
+      } else {
+        html += `<h3 class="sub-head">Open absorbed vetoes <span class="count">${open.length ? `(${open.length})` : ''}</span></h3>
+          <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
+            <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Live R</th>
+          </tr></thead><tbody>` + (open.length ? open.map((t) => `<tr title="${esc(t.reason || '')}">
+            <td data-l="Coin">${coinCell(t)}</td>
+            <td class="r" data-l="Entry">${fmtPx(t.entry_px)}</td>
+            <td class="r" data-l="Mark">${fmtPx(t.mark_px)}</td>
+            <td class="r ${signClass(t.live_r)}" data-l="Live R">${fmtR(t.live_r)}</td>
+          </tr>`).join('') : emptyRow(4, 'no open absorbed vetoes')) + `</tbody></table></div>`;
+        const STATUS_TAG = { stopped: 'tag-stop', stop: 'tag-stop', target: 'tag-tp', tp: 'tag-tp' };
+        html += `<h3 class="sub-head">Resolved <span class="count">${resolved.length ? `(${resolved.length})` : ''}</span></h3>
+          <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
+            <th>Coin</th><th>Status</th><th class="r">R</th>
+          </tr></thead><tbody>` + (resolved.length ? resolved.map((t) => {
+          const stt = String(t.status || '').toLowerCase();
+          return `<tr title="${esc(t.reason || '')}">
+            <td data-l="Coin">${coinCell(t)}</td>
+            <td data-l="Status"><span class="tag ${STATUS_TAG[stt] || 'tag-pending'}">${esc((stt || '\u2014').toUpperCase())}</span></td>
+            <td class="r ${signClass(t.r)}" data-l="R">${fmtR(t.r)}</td>
+          </tr>`;
+        }).join('') : emptyRow(3, 'no resolved vetoes yet')) + `</tbody></table></div>`;
+      }
+      el.innerHTML = html;
+    } catch (e) {
+      try { console.error('proposer-only race detail failed to render; hiding it', e); } catch (_) { /* noop */ }
+      el.hidden = true;
     }
   }
 
@@ -1602,6 +1735,24 @@
     if (state.feedQuietOpen.has(key)) state.feedQuietOpen.delete(key); else state.feedQuietOpen.add(key);
     renderFeed();
   });
+  // Architecture race: the cards are tabs — pick a book to show its detail view below the strip.
+  // Clicking never changes data, only which detail is visible (state.raceTab, a JS variable only).
+  (function wireRaceTabs() {
+    const strip = $id('arch-race');
+    if (!strip) return;   // stale cached index.html without the strip: nothing to wire
+    const pickBook = (e) => {
+      const card = e.target.closest('.race-card');
+      if (!card || !card.dataset.book || !strip.contains(card)) return;
+      state.raceTab = card.dataset.book;
+      renderArchRace();   // re-renders the strip highlight + the detail view
+    };
+    strip.addEventListener('click', pickBook);
+    strip.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      pickBook(e);
+    });
+  })();
   // Shadow & learner panel: view tabs (active tab survives the poll re-render, like the feed chips).
   $id('shl-tabs').addEventListener('click', (e) => {
     const b = e.target.closest('.fchip');
