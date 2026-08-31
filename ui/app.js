@@ -977,6 +977,27 @@
     else if (sel === 'prop') renderRaceProp();
   }
 
+  // Open-perps table from status.snapshot.perps — shared by the LLM-book and proposer-only detail
+  // views so both render executed positions identically. Null-guards every field; side comes from the
+  // explicit field when present, else the sign of size (positive = long).
+  function perpPositionsTable(perps, emptyText) {
+    const rows = (Array.isArray(perps) ? perps : []).filter((p) => p && typeof p === 'object');
+    const stopTp = (stop, tp) => `<span class="small">${stop != null ? `<span class="neg">stop ${fmtPx(stop)}</span>` : '<span class="muted">no stop</span>'} <span class="arrow">\u2192</span> ${tp != null ? `<span class="pos">tp ${fmtPx(tp)}</span>` : '<span class="muted">no tp</span>'}</span>`;
+    return `<div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
+        <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">uPnL</th><th>Stop \u2192 TP</th>
+      </tr></thead><tbody>` + (rows.length ? rows.map((p) => {
+      const side = p.side != null ? (String(p.side).toLowerCase() === 'short' ? 'short' : 'long')
+        : (typeof p.size === 'number' && p.size < 0 ? 'short' : 'long');
+      return `<tr>
+        <td data-l="Coin"><div class="coin">${esc(p.coin || '\u2014')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${typeof p.leverage === 'number' && !isNaN(p.leverage) ? ` <span class="muted">${p.leverage}x</span>` : ''}</div></td>
+        <td class="r" data-l="Entry">${fmtPx(p.entry_px)}</td>
+        <td class="r" data-l="Mark">${fmtPx(p.mark_px)}</td>
+        <td class="r ${signClass(p.unrealized_pnl)}" data-l="uPnL">${fmtUSD(p.unrealized_pnl, true)}</td>
+        <td data-l="Stop \u2192 TP">${stopTp(p.stop_px, p.tp_px)}</td>
+      </tr>`;
+    }).join('') : emptyRow(5, emptyText || 'no open perp positions')) + `</tbody></table></div>`;
+  }
+
   // LLM-book detail: open perps + PM positions from status.snapshot, plus a resting-orders one-liner.
   // Every field is null-guarded; own try/catch hides only this section on a malformed payload.
   function renderRaceLLM() {
@@ -988,24 +1009,8 @@
       const perps = (Array.isArray(snap.perps) ? snap.perps : []).filter((p) => p && typeof p === 'object');
       const pmPos = (Array.isArray(snap.pm) ? snap.pm : []).filter((m) => m && typeof m === 'object');
       const resting = Array.isArray(s.resting_orders) ? s.resting_orders.length : 0;
-      const stopTp = (stop, tp) => `<span class="small">${stop != null ? `<span class="neg">stop ${fmtPx(stop)}</span>` : '<span class="muted">no stop</span>'} <span class="arrow">\u2192</span> ${tp != null ? `<span class="pos">tp ${fmtPx(tp)}</span>` : '<span class="muted">no tp</span>'}</span>`;
-      let html = `<h3 class="sub-head">Open perp positions <span class="count">${perps.length ? `(${perps.length})` : ''}</span></h3>
-        <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
-          <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">uPnL</th><th>Stop \u2192 TP</th>
-        </tr></thead><tbody>`;
-      html += perps.length ? perps.map((p) => {
-        // side: explicit field wins, else the sign of size (positive = long)
-        const side = p.side != null ? (String(p.side).toLowerCase() === 'short' ? 'short' : 'long')
-          : (typeof p.size === 'number' && p.size < 0 ? 'short' : 'long');
-        return `<tr>
-          <td data-l="Coin"><div class="coin">${esc(p.coin || '\u2014')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${typeof p.leverage === 'number' && !isNaN(p.leverage) ? ` <span class="muted">${p.leverage}x</span>` : ''}</div></td>
-          <td class="r" data-l="Entry">${fmtPx(p.entry_px)}</td>
-          <td class="r" data-l="Mark">${fmtPx(p.mark_px)}</td>
-          <td class="r ${signClass(p.unrealized_pnl)}" data-l="uPnL">${fmtUSD(p.unrealized_pnl, true)}</td>
-          <td data-l="Stop \u2192 TP">${stopTp(p.stop_px, p.tp_px)}</td>
-        </tr>`;
-      }).join('') : emptyRow(5, 'no open perp positions');
-      html += `</tbody></table></div>`;
+      let html = `<h3 class="sub-head">Open perp positions <span class="count">${perps.length ? `(${perps.length})` : ''}</span></h3>`
+        + perpPositionsTable(perps, 'no open perp positions');
       if (pmPos.length) {
         const ct = (v) => (typeof v === 'number' && !isNaN(v) ? (v * 100).toFixed(1) + '\u00A2' : '\u2014');
         html += `<h3 class="sub-head">Prediction markets <span class="count">(${pmPos.length})</span></h3>
@@ -1049,10 +1054,21 @@
         return `<span class="coin">${esc(t.coin || '\u2014')}</span> <span class="side-pill ${side}">${side.toUpperCase()}</span>${typeof t.size_usd === 'number' && !isNaN(t.size_usd) ? ` <span class="muted small">${fmtUSD(t.size_usd)}</span>` : ''}`;
       };
       let html = `<div class="muted small race-detail-note">= LLM book + every verifier-vetoed trade taken (counterfactual)</div>`;
+      // Accepted trades: the executed positions this counterfactual book shares with the LLM book
+      // (status.snapshot.perps, same table as the LLM detail). Own try/catch so a malformed snapshot
+      // degrades to a one-line note without touching the vetoed sections below.
+      try {
+        const perps = (s.snapshot && typeof s.snapshot === 'object' && Array.isArray(s.snapshot.perps) ? s.snapshot.perps : []).filter((p) => p && typeof p === 'object');
+        html += `<h3 class="sub-head">Accepted trades (live in the LLM book) <span class="count">${perps.length ? `(${perps.length})` : ''}</span></h3>`
+          + perpPositionsTable(perps, 'no open executed positions');
+      } catch (e2) {
+        try { console.error('accepted-trades section of the proposer-only detail failed; skipping it', e2); } catch (_) { /* noop */ }
+        html += `<div class="muted small race-detail-note">accepted trades unavailable</div>`;
+      }
       if (!open.length && !resolved.length) {
         html += `<div class="empty-state compact"><div class="empty-sub">no vetoes absorbed yet - proposer and verifier currently agree</div></div>`;
       } else {
-        html += `<h3 class="sub-head">Open absorbed vetoes <span class="count">${open.length ? `(${open.length})` : ''}</span></h3>
+        html += `<h3 class="sub-head">Vetoed trades (absorbed as shadows) <span class="count">${open.length ? `(${open.length} open)` : ''}</span></h3>
           <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
             <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Live R</th>
           </tr></thead><tbody>` + (open.length ? open.map((t) => `<tr title="${esc(t.reason || '')}">
