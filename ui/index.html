@@ -355,6 +355,46 @@
     </div>
   </section>
 
+  <!-- Panel 3c: rule book (status.rule_book — deterministic rule-based book racing the LLM book, A/B benchmark) -->
+  <section class="panel rulebook-panel" id="rulebook-panel" hidden>
+    <div class="panel-head">
+      <h2>⚙️ Rule Book</h2>
+      <div class="panel-tools">
+        <span id="rb-equity">—</span>
+        <span id="rb-mult">—</span>
+        <span id="rb-vs" class="rb-chip" hidden></span>
+      </div>
+    </div>
+    <div class="muted small rb-caption">Deterministic pullback strategy (no LLM) — same $300, same prices, zero cost. A/B benchmark.</div>
+
+    <h3 class="sub-head">Open positions <span class="count" id="rb-pos-count"></span></h3>
+    <div class="table-wrap">
+      <table class="tbl num-tbl cards" id="rb-pos-table">
+        <thead><tr>
+          <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Stop</th><th class="r">TP</th><th class="r">Notional</th><th class="r">uPnL</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h3 class="sub-head">Resting limits <span class="count" id="rb-pending-count"></span></h3>
+    <div class="table-wrap">
+      <table class="tbl num-tbl cards" id="rb-pending-table">
+        <thead><tr><th>Coin</th><th class="r">Limit</th><th class="r">Expires in</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h3 class="sub-head">Closed trades <span class="count" id="rb-trades-count"></span></h3>
+    <div class="table-wrap">
+      <table class="tbl num-tbl cards" id="rb-trades-table">
+        <thead><tr><th>Coin</th><th>Why</th><th class="r">R</th><th class="r">PnL</th><th class="r">When</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="rb-trades-sum" class="muted small"></div>
+  </section>
+
   <!-- Panel 4: decision feed -->
   <section class="panel feed-panel">
     <div class="panel-head">

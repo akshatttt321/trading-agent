@@ -192,6 +192,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .positions-panel{ grid-column: span 5; }
 .shadow-panel   { grid-column: 1 / -1; }
 .perf-panel     { grid-column: 1 / -1; }
+.rulebook-panel { grid-column: 1 / -1; }  /* full-width: without this the panel collapses to one grid track */
 .feed-panel     { grid-column: 1 / -1; }
 .risk-panel     { grid-column: 1 / -1; }
 @media (max-width: 1500px) {
@@ -988,3 +989,14 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
   .rej-cards { grid-template-columns: 1fr; }
   .ctx-meta { margin-left: 0; white-space: normal; flex-basis: 100%; }
 }
+
+/* ---- rule book panel (status.rule_book — deterministic A/B benchmark racing the LLM book) ---- */
+.rb-caption { margin: -4px 0 2px; }
+#rb-equity { font-family: var(--mono); font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.rb-mult { font-family: var(--mono); font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rb-chip { font-family: var(--mono); font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border); color: var(--text-2); white-space: nowrap; }
+.rb-chip.lead { background: var(--good-soft); color: var(--good); border-color: rgba(34,177,76,0.35); }
+.rb-chip.trail { background: var(--bad-soft); color: var(--bad); border-color: rgba(224,75,75,0.35); }
+.rb-chip[hidden] { display: none; }
+#rb-trades-sum { margin-top: 8px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+#rb-trades-sum:empty { display: none; }

@@ -888,6 +888,97 @@
   }
 
 
+  // -------------------------------------------------------------- render: rule book (status.rule_book)
+  // Deterministic rule-based book racing the LLM book from the same $300 start (A/B benchmark).
+  // `rule_book` may be null/absent on older payloads, and equity / mark / upnl are only stamped
+  // hourly so they may be missing too — every field access is null-guarded and the whole body is
+  // wrapped in try/catch so a malformed payload can never crash renderAll.
+  function renderRuleBook() {
+    const panel = $id('rulebook-panel');
+    if (!panel) return;   // stale cached index.html without the panel skeleton: skip quietly
+    try {
+      const rb = state.status && state.status.rule_book;
+      if (!rb || typeof rb !== 'object') { panel.hidden = true; return; }
+      panel.hidden = false;
+
+      // header: equity (fallback: cash), multiple vs start, comparison chip vs the LLM book
+      const start = typeof rb.start === 'number' && !isNaN(rb.start) ? rb.start : null;
+      const equity = typeof rb.equity === 'number' && !isNaN(rb.equity) ? rb.equity
+        : (typeof rb.cash === 'number' && !isNaN(rb.cash) ? rb.cash : null);
+      $id('rb-equity').textContent = fmtUSD(equity);
+      const mult = equity != null && start ? equity / start : null;
+      const mEl = $id('rb-mult');
+      mEl.textContent = mult != null ? mult.toFixed(3) + 'x' : '—';
+      mEl.className = 'rb-mult ' + (mult != null ? (mult >= 1 ? 'pos' : 'neg') : '');
+      const s = state.status || {};
+      const llmEq = s.equity != null ? s.equity : (s.snapshot && s.snapshot.equity_usd);
+      const chip = $id('rb-vs');
+      if (llmEq != null && !isNaN(llmEq) && equity != null) {
+        chip.hidden = false;
+        chip.textContent = `vs LLM ${fmtUSD(llmEq)} · ${equity > llmEq ? 'rules lead' : equity < llmEq ? 'LLM leads' : 'tied'}`;
+        chip.className = 'rb-chip ' + (equity > llmEq ? 'lead' : equity < llmEq ? 'trail' : '');
+      } else { chip.hidden = true; }
+
+      // open positions ({coin: {...}} map)
+      const posEntries = rb.positions && typeof rb.positions === 'object' && !Array.isArray(rb.positions)
+        ? Object.entries(rb.positions) : [];
+      $id('rb-pos-count').textContent = posEntries.length ? `(${posEntries.length})` : '';
+      $id('rb-pos-table').querySelector('tbody').innerHTML = posEntries.length ? posEntries.map(([coin, p]) => {
+        p = p && typeof p === 'object' ? p : {};
+        const side = String(p.side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+        return `<tr>
+          <td data-l="Coin"><div class="coin">${esc(coin)}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span></div></td>
+          <td class="r" data-l="Entry">${fmtPx(p.entry)}</td>
+          <td class="r" data-l="Mark">${fmtPx(p.mark)}</td>
+          <td class="r" data-l="Stop">${fmtPx(p.stop)}</td>
+          <td class="r" data-l="TP">${fmtPx(p.tp)}</td>
+          <td class="r" data-l="Notional">${fmtUSD(p.notional)}</td>
+          <td class="r ${signClass(p.upnl)}" data-l="uPnL">${fmtUSD(p.upnl, true)}</td>
+        </tr>`;
+      }).join('') : emptyRow(7, 'no open positions');
+
+      // pending limit orders (expires-in computed from expires_ts)
+      const pend = Array.isArray(rb.pending) ? rb.pending : [];
+      const nowS = Date.now() / 1000;
+      $id('rb-pending-count').textContent = pend.length ? `(${pend.length})` : '';
+      $id('rb-pending-table').querySelector('tbody').innerHTML = pend.length ? pend.map((o) => {
+        o = o && typeof o === 'object' ? o : {};
+        const side = String(o.side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+        const left = typeof o.expires_ts === 'number' ? o.expires_ts - nowS : null;
+        return `<tr>
+          <td data-l="Coin"><span class="coin">${esc(o.coin || '—')}</span> <span class="side-pill ${side}">${side.toUpperCase()}</span></td>
+          <td class="r" data-l="Limit">${fmtPx(o.limit)}</td>
+          <td class="r" data-l="Expires in">${left == null || isNaN(left) ? '—' : left <= 0 ? 'expired' : fmtAge(left)}</td>
+        </tr>`;
+      }).join('') : emptyRow(3, 'no resting limits');
+
+      // closed trades: most recent first, max 10, plus a cumulative line
+      const trades = (Array.isArray(rb.trades) ? rb.trades.filter((t) => t && typeof t === 'object') : [])
+        .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      $id('rb-trades-count').textContent = trades.length ? `(${trades.length})` : '';
+      const WHY_TAG = { stop: 'tag-stop', tp: 'tag-tp', time: 'tag-stale' };
+      $id('rb-trades-table').querySelector('tbody').innerHTML = trades.length ? trades.slice(0, 10).map((t) => {
+        const side = String(t.side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+        const why = String(t.why || '—').toLowerCase();
+        return `<tr>
+          <td data-l="Coin"><span class="coin">${esc(t.coin || '—')}</span> <span class="side-pill ${side}">${side.toUpperCase()}</span></td>
+          <td data-l="Why"><span class="tag ${WHY_TAG[why] || 'tag-pending'}">${esc(why.toUpperCase())}</span></td>
+          <td class="r ${signClass(t.r)}" data-l="R">${typeof t.r === 'number' && !isNaN(t.r) ? (t.r > 0 ? '+' : '') + t.r.toFixed(2) + 'R' : '—'}</td>
+          <td class="r ${signClass(t.pnl)}" data-l="PnL">${fmtUSD(t.pnl, true)}</td>
+          <td class="r muted" data-l="When">${fmtTime(t.ts)}</td>
+        </tr>`;
+      }).join('') : emptyRow(5, 'no closed trades yet');
+      const netR = trades.reduce((a, t) => a + (typeof t.r === 'number' && !isNaN(t.r) ? t.r : 0), 0);
+      const netUsd = trades.reduce((a, t) => a + (typeof t.pnl === 'number' && !isNaN(t.pnl) ? t.pnl : 0), 0);
+      $id('rb-trades-sum').innerHTML = trades.length
+        ? `${trades.length} trades, net <span class="${signClass(netR)}">${(netR > 0 ? '+' : '') + netR.toFixed(1)}R</span>, <span class="${signClass(netUsd)}">${fmtUSD(netUsd, true)}</span>`
+        : '';
+    } catch (e) {
+      try { console.error('rule-book panel failed to render; hiding it', e); } catch (_) { /* noop */ }
+      panel.hidden = true;
+    }
+  }
+
   // -------------------------------------------------------------- render: shadow trades & learner (one panel, three views)
   // Live shadows come from status.shadow_trades (rejected entries the agent paper-simulates to score the
   // rejecter); the Scoreboard and Lessons views come from GET /api/learner. live_r / r read from the REJECTED
@@ -1779,6 +1870,7 @@
     renderMarketBrief();
     renderChart();
     renderPositions();
+    renderRuleBook();   // self-contained try/catch: a malformed rule_book payload never blanks the dashboard
     // Isolated: a bad shadow-trades payload or a stale page must never blank the rest of the dashboard
     // (before this guard, one exception here also killed the demo fallback's renderAll — total wipeout).
     try {
