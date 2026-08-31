@@ -211,14 +211,60 @@ class OpenRouterProvider(OpenAIProvider):
         self.client = openai.OpenAI(api_key=self.api_key, base_url="https://openrouter.ai/api/v1")
 
 
-PROVIDERS = {"anthropic": AnthropicProvider, "gemini": GeminiProvider, "openai": OpenAIProvider, "openrouter": OpenRouterProvider}
+class AgentRouterProvider(OpenAIProvider):
+    """AgentRouter (agentrouter.org): free-credit gateway; needs a coding-agent User-Agent, and thinking models
+    (deepseek-v4-flash) may return the answer in reasoning_content with empty content - handled here."""
+    name = "agentrouter"
+
+    def __init__(self, *a, **k):
+        Provider.__init__(self, *a, **k)
+        import openai
+        self.client = openai.OpenAI(api_key=self.api_key, base_url="https://agentrouter.org/v1",
+                                    default_headers={"User-Agent": "claude-cli/2.0.14 (external, cli)"})
+
+    def complete(self, system, user, schema, tool_name="submit") -> Completion:
+        import re as _re
+        try:
+            kwargs: Dict[str, Any] = dict(
+                model=self.model,
+                messages=[{"role": "system", "content": system + "\nReply with ONLY a single JSON object matching this schema (exact field names):\n"
+                           + json.dumps(schema, separators=(",", ":"))[:4000]},
+                          {"role": "user", "content": user}],
+            )
+            try:  # some gateway channels reject response_format - try with, then without
+                resp = self.client.chat.completions.create(
+                    max_tokens=self.max_tokens,
+                    response_format={"type": "json_schema", "json_schema": {"name": tool_name, "schema": schema, "strict": False}}, **kwargs)
+            except Exception as e:
+                if "response_format" in str(e) or "json_schema" in str(e) or "unsupported" in str(e).lower():
+                    resp = self.client.chat.completions.create(max_tokens=self.max_tokens, **kwargs)
+                else:
+                    raise
+            u = resp.usage
+            usage = Usage(getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0, 0)
+            msg = resp.choices[0].message
+            text = (msg.content or "") or (getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None) or "")
+            try:
+                return Completion(json.loads(text), text, usage)
+            except json.JSONDecodeError:
+                for cand in reversed(_re.findall(r"\{.*\}", text, _re.S) or _re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, _re.S)):
+                    try:
+                        return Completion(json.loads(cand), text, usage)
+                    except Exception:
+                        continue
+                return Completion(None, text, usage, "agentrouter returned non-JSON")
+        except Exception as e:
+            return Completion(None, "", Usage(), f"agentrouter error: {e}")
+
+
+PROVIDERS = {"anthropic": AnthropicProvider, "gemini": GeminiProvider, "openai": OpenAIProvider, "openrouter": OpenRouterProvider, "agentrouter": AgentRouterProvider}
 
 
 def make_provider(name: str, model: str, api_key: Optional[str], max_tokens: int, temperature: float, thinking: str = "minimal") -> Provider:
     if name not in PROVIDERS:
         raise SystemExit(f"unknown llm provider {name!r}; choose one of {list(PROVIDERS)}")
     if not api_key:
-        env = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}[name]
+        env = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY", "agentrouter": "AGENTROUTER_API_KEY"}[name]
         raise SystemExit(f"{env} is not set in .env (required for provider {name!r})")
     log.info(f"llm provider {name}:{model} thinking={thinking}")
     return PROVIDERS[name](model, api_key, max_tokens, temperature, thinking)

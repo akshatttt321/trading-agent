@@ -223,6 +223,7 @@ class Config(BaseModel):
     gemini_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
+    agentrouter_api_key: Optional[str] = None
     hl_api_wallet_key: Optional[str] = None
     hl_account_address: Optional[str] = None
     poly_private_key: Optional[str] = None
@@ -244,17 +245,17 @@ class Config(BaseModel):
 
     def key_for(self, provider: str) -> Optional[str]:
         return {"anthropic": self.anthropic_api_key, "gemini": self.gemini_api_key, "openai": self.openai_api_key,
-                "openrouter": self.openrouter_api_key}.get(provider)
+                "openrouter": self.openrouter_api_key, "agentrouter": self.agentrouter_api_key}.get(provider)
 
     def validate_runtime(self) -> None:
         if self.mode not in ("paper", "testnet", "live"):
             raise SystemExit(f"config.mode must be paper|testnet|live, got {self.mode!r}")
         refs = [self.llm.proposer] + ([self.llm.verifier] if self.llm.verifier.enabled else [])
         for ref in refs:
-            if ref.provider not in ("anthropic", "gemini", "openai", "openrouter"):
+            if ref.provider not in ("anthropic", "gemini", "openai", "openrouter", "agentrouter"):
                 raise SystemExit(f"llm provider must be anthropic|gemini|openai, got {ref.provider!r}")
             if not self.key_for(ref.provider):
-                env = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}[ref.provider]
+                env = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY", "agentrouter": "AGENTROUTER_API_KEY"}[ref.provider]
                 raise SystemExit(f"{env} is not set in .env (needed for llm provider {ref.provider!r})")
         if self.mode in ("testnet", "live"):
             if not self.hl_api_wallet_key or not self.hl_account_address:
@@ -279,6 +280,7 @@ def load_config(path: Optional[Path] = None) -> Config:
     cfg.gemini_api_key = os.getenv("GEMINI_API_KEY") or None
     cfg.openai_api_key = os.getenv("OPENAI_API_KEY") or None
     cfg.openrouter_api_key = os.getenv("OPENROUTER_API_KEY") or None
+    cfg.agentrouter_api_key = os.getenv("AGENTROUTER_API_KEY") or None
     cfg.hl_api_wallet_key = os.getenv("HL_API_WALLET_PRIVATE_KEY") or None
     cfg.hl_account_address = os.getenv("HL_ACCOUNT_ADDRESS") or None
     cfg.poly_private_key = os.getenv("POLY_PRIVATE_KEY") or None
