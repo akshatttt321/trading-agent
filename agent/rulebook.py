@@ -141,7 +141,13 @@ class RuleBook:
             except Exception:
                 log.exception(f"rule book {coin}")
         b["trades"] = b["trades"][-200:]
-        self.state.set("rule_book", b)
         eq = self.equity(prices)
+        b["equity"] = round(eq, 2)                              # stamped for the dashboard
+        for c, p_ in b["positions"].items():
+            px = prices.get(c) or p_["entry"]
+            sgn = 1 if p_["side"] == "long" else -1
+            p_["mark"] = px
+            p_["upnl"] = round(p_["notional"] * sgn * (px - p_["entry"]) / p_["entry"], 2)
+        self.state.set("rule_book", b)
         log.info(f"[bold]RULE-BOOK[/] equity ${eq:,.2f} ({eq / b['start']:.3f}x) positions={len(b['positions'])} "
                  f"pending={len(b['pending'])} trades={len(b['trades'])}")
