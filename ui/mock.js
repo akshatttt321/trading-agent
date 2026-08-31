@@ -551,6 +551,16 @@
       },
       // Today's prediction-market research spend (You.com calls).
       research_today: { day: new Date(t * 1000).toISOString().slice(0, 10), usd: 0.012 },
+      // Proposer-only counterfactual book: the LLM book if the verifier never vetoed (status.proposer_book).
+      // Equity tracks the drifting demo prices so the race strip moves between polls.
+      proposer_book: {
+        start: startEquity,
+        equity: round(snap.equity_usd + 15.72, 2),
+        vetoes_resolved: 7,
+        vetoes_open: 8,
+        vetoed_r: 3.53,
+        note: 'counterfactual: LLM book if the verifier never vetoed (gates still applied); shadow fills are optimistic',
+      },
       // Deterministic rule-based book racing the LLM book (A/B benchmark).
       rule_book: ruleBookView(),
       snapshot: snap,

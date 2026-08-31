@@ -367,6 +367,10 @@
     </div>
     <div class="muted small rb-caption">Deterministic pullback strategy (no LLM) — same $300, same prices, zero cost. A/B benchmark.</div>
 
+    <!-- Architecture race: LLM book vs rule book vs proposer-only counterfactual (status.proposer_book).
+         Fixed order, never sorted; rendered by renderRuleBook() → renderArchRace() in app.js. -->
+    <div id="arch-race" class="arch-race" hidden></div>
+
     <h3 class="sub-head">Open positions <span class="count" id="rb-pos-count"></span></h3>
     <div class="table-wrap">
       <table class="tbl num-tbl cards" id="rb-pos-table">

@@ -888,6 +888,66 @@
   }
 
 
+  // -------------------------------------------------------------- render: architecture race strip (inside the rule-book panel)
+  // Three books racing from the same start: the full LLM pipeline (proposer+verifier+manager), the
+  // deterministic rule book, and the proposer-only counterfactual (status.proposer_book — what the LLM
+  // book would hold if the verifier never vetoed; gates still applied, shadow fills optimistic).
+  // Fixed card order — never sorted; the strictly-best multiple gets a "leading" badge, ties get none.
+  // `proposer_book` is a NEW key absent on old payloads: its card is simply omitted, the other two stay.
+  // Own try/catch so a malformed payload hides the strip without touching the rest of the panel.
+  function renderArchRace() {
+    const strip = $id('arch-race');
+    if (!strip) return;   // stale cached index.html without the strip container: skip quietly
+    try {
+      const s = state.status || {};
+      const num = (v) => (typeof v === 'number' && !isNaN(v) ? v : null);
+      const cards = [];
+
+      // 1) LLM book: the main account (full proposer + verifier + manager pipeline)
+      const llmEq = num(s.equity) != null ? num(s.equity) : num(s.snapshot && s.snapshot.equity_usd);
+      cards.push({ id: 'llm', name: '\u{1F9E0} LLM book', equity: llmEq, start: num(s.starting_equity) });
+
+      // 2) rule book (equity falls back to cash, same as the panel header)
+      const rb = s.rule_book && typeof s.rule_book === 'object' ? s.rule_book : null;
+      if (rb) {
+        cards.push({
+          id: 'rule', name: '\u2699\uFE0F Rule book',
+          equity: num(rb.equity) != null ? num(rb.equity) : num(rb.cash), start: num(rb.start),
+        });
+      }
+
+      // 3) proposer-only counterfactual (status.proposer_book, may be absent on old payloads)
+      const pb = s.proposer_book && typeof s.proposer_book === 'object' ? s.proposer_book : null;
+      if (pb) {
+        const vetoes = n0(pb.vetoes_resolved) + n0(pb.vetoes_open);
+        cards.push({
+          id: 'prop', name: '\u{1F916} Proposer-only',
+          equity: num(pb.equity), start: num(pb.start),
+          sub: `counterfactual \u00B7 ${vetoes} vetoes absorbed`,
+          note: typeof pb.note === 'string' ? pb.note : '',
+        });
+      }
+
+      for (const c of cards) c.mult = c.equity != null && c.start ? c.equity / c.start : null;
+      const mults = cards.map((c) => c.mult).filter((m) => m != null);
+      const best = mults.length ? Math.max.apply(null, mults) : null;
+      const leaders = best != null ? cards.filter((c) => c.mult === best) : [];
+      const leaderId = leaders.length === 1 ? leaders[0].id : null;   // tie or no data -> no badge
+
+      strip.innerHTML = cards.map((c) => `
+        <div class="race-card"${c.note ? ` title="${esc(c.note)}"` : ''}>
+          <div class="race-name">${c.name}${c.id === leaderId ? ' <span class="race-badge">leading</span>' : ''}</div>
+          <div class="race-eq">${fmtUSD(c.equity)}</div>
+          <div class="race-mult ${c.mult != null ? (c.mult >= 1 ? 'pos' : 'neg') : 'muted'}">${c.mult != null ? c.mult.toFixed(3) + 'x' : '\u2014'}</div>
+          ${c.sub ? `<div class="race-sub muted small">${esc(c.sub)}</div>` : ''}
+        </div>`).join('');
+      strip.hidden = cards.length === 0;
+    } catch (e) {
+      try { console.error('architecture race strip failed to render; hiding it', e); } catch (_) { /* noop */ }
+      strip.hidden = true;
+    }
+  }
+
   // -------------------------------------------------------------- render: rule book (status.rule_book)
   // Deterministic rule-based book racing the LLM book from the same $300 start (A/B benchmark).
   // `rule_book` may be null/absent on older payloads, and equity / mark / upnl are only stamped
@@ -900,6 +960,7 @@
       const rb = state.status && state.status.rule_book;
       if (!rb || typeof rb !== 'object') { panel.hidden = true; return; }
       panel.hidden = false;
+      renderArchRace();   // race strip: own try/catch, cannot break the tables below
 
       // header: equity (fallback: cash), multiple vs start, comparison chip vs the LLM book
       const start = typeof rb.start === 'number' && !isNaN(rb.start) ? rb.start : null;
