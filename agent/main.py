@@ -43,6 +43,8 @@ class Agent:
         self.state = State()
         self.notify = Notifier(cfg)
         self.md = MarketData(cfg)
+        from .rulebook import RuleBook
+        self.rulebook = RuleBook(cfg, self.state, self.md)
         self.brain = Brain(cfg)
         self.risk = RiskGate(cfg, self.state)
         self.rr = RiskRewardModel(cfg)
@@ -818,6 +820,10 @@ class Agent:
             self.state.set("start_ts", time.time())
             self.notify.send(f"Starting equity recorded: ${snap.equity_usd:,.2f}")
         self.risk.roll_day(snap)
+        try:
+            self.rulebook.hourly(prices)                       # parallel deterministic book (A/B vs the LLM book)
+        except Exception:
+            log.exception("rule book hourly")
 
         kill = self.risk.check_kill(snap)
         if kill:
