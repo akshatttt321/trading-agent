@@ -141,6 +141,20 @@ def status():
         "watch_levels": meta(c, "watch_levels") or [],
         "market_brief": meta(c, "market_brief"),
         "rule_book": meta(c, "rule_book"),
+        "proposer_book": (lambda shs, rts: (lambda vetoed: {
+            # PROPOSER-ONLY COUNTERFACTUAL BOOK: the LLM book with every verifier veto taken instead of blocked.
+            # equity = actual equity + vetoed-trade shadow PnL (resolved at stop/TP, open at live mark). $0 extra LLM cost.
+            "start": start_eq,
+            "equity": round((equity or 0)
+                + sum((sh.get("r") or 0) * (sh.get("size_usd") or 0) * abs((sh.get("entry_px") or 0) - (sh.get("stop_px") or 0)) / (sh.get("entry_px") or 1)
+                      for sh in vetoed if sh.get("status") in ("stopped", "target"))
+                + sum((sh.get("live_r") or 0) * (sh.get("size_usd") or 0) * abs((sh.get("entry_px") or 0) - (sh.get("stop_px") or 0)) / (sh.get("entry_px") or 1)
+                      for sh in vetoed if sh.get("status") == "open"), 2),
+            "vetoes_resolved": sum(1 for sh in vetoed if sh.get("status") in ("stopped", "target")),
+            "vetoes_open": sum(1 for sh in vetoed if sh.get("status") == "open"),
+            "vetoed_r": round(sum((sh.get("r") or 0) for sh in vetoed if sh.get("status") in ("stopped", "target")), 2),
+            "note": "counterfactual: LLM book if the verifier never vetoed (gates still applied); shadow fills are optimistic",
+        })([sh for sh in shs if "verifier" in str(sh.get("by") or "").lower() and (sh.get("ts") or 0) >= (rts or 0)]))(meta(c, "shadow_trades") or [], start_ts),
         "exit_quality": (meta(c, "exit_quality") or [])[-12:],
         "resting_orders": [{**{k: (r.get("action") or {}).get(k) for k in ("coin", "side", "size_usd", "limit_price", "stop_loss_px", "take_profit_px")}, "ts": r.get("ts")}
                            for r in (meta(c, "resting_orders") or [])],
