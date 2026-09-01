@@ -309,10 +309,11 @@ class Agent:
                     "{\"name\":\"...\",\"utc\":\"YYYY-MM-DDTHH:MMZ\",\"consensus\":\"one short line\","
                     "\"importance\":\"high|medium\"}. If the exact time is unknown use 13:30Z for US data. No prose.")
                 import re as _re
+                import json as _mj
                 txt = (ya or {}).get("answer") or ""
                 m = _re.search(r"\[.*\]", txt, _re.S)
                 evs = []
-                for e in (json.loads(m.group(0)) if m else []):
+                for e in (_mj.loads(m.group(0)) if m else []):
                     try:
                         ts = time.mktime(time.strptime(str(e["utc"]).replace("Z", ""), "%Y-%m-%dT%H:%M")) - time.timezone
                         evs.append({"name": str(e.get("name"))[:60], "ts": ts, "consensus": str(e.get("consensus", ""))[:120],
@@ -321,7 +322,8 @@ class Agent:
                         continue
                 names = {e["name"] for e in evs}
                 keep = [e for e in (st.get("events") or []) if e.get("stance") and now - (e.get("ts") or 0) < 24 * 3600 and e["name"] not in names]
-                st = {"ts": now, "events": evs + keep}
+                # an empty parse retries in ~1h instead of going blind for 12h
+                st = {"ts": now if evs else now - 11 * 3600, "events": evs + keep}
                 self.state.set("macro_events", st)
                 log.info(f"[dim]macro events refreshed: {len(evs)} upcoming[/]")
             except Exception as e:
