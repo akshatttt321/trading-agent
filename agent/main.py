@@ -1061,6 +1061,10 @@ class Agent:
         def _sig_match(a_) -> bool:
             if a_.kind not in ("open_perp", "pm_buy"):
                 return False
+            # tolerance scales with cap tier: majors move less, so 0.5% is a real level change there;
+            # midcaps 1%, movers/low-caps (and PM tokens) 1.5% - their noise band is simply wider.
+            bkt = self.cfg.universe.bucket_of(a_.coin) if a_.coin else None
+            tol = {"majors": 0.005, "midcaps": 0.01}.get(bkt or "", 0.015)
             for e in vcache:
                 if e.get("kind") != a_.kind or e.get("coin") != (a_.coin or a_.outcome) or e.get("side") != (a_.side or "buy"):
                     continue
@@ -1069,7 +1073,7 @@ class Agent:
                     v, w = getattr(a_, f, None), e.get(f)
                     if v is None and w is None:
                         continue
-                    if v is None or not w or abs(v - w) / abs(w) > 0.005:
+                    if v is None or not w or abs(v - w) / abs(w) > tol:
                         ok = False
                         break
                 if ok:
