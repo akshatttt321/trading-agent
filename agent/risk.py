@@ -351,6 +351,13 @@ class RiskGate:
             br = self.breaker_status(snap, now_ts)
             if br:
                 return Verdict(False, br, a)
+            # EVENT CAUTION WINDOW (free): no NEW perp entries within +/-30 min of a scheduled HIGH-importance
+            # binary event (CPI/FOMC/NFP) - spreads and slippage make entries fiction in that window.
+            for ev_ in ((self.state.get("macro_events") or {}).get("events") or []):
+                if ev_.get("importance") == "high" and abs(now_ts - (ev_.get("ts") or 0)) <= 30 * 60:
+                    dmin = (ev_["ts"] - now_ts) / 60
+                    when = f"in {dmin:.0f}m" if dmin > 0 else f"{-dmin:.0f}m ago"
+                    return Verdict(False, f"event caution window: {ev_.get('name')} {when} - new perp entries paused +/-30m", a)
             # LOSS RE-ENTRY COOLDOWN: a coin that just lost money (ANY exit reason) needs fresh structure, not a rematch.
             if self.r.loss_reentry_cooldown_min:
                 for ots, oa, ores in self.state.db.execute(

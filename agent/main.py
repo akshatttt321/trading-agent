@@ -293,6 +293,59 @@ class Agent:
             return {"age_h": round((time.time() - b["ts"]) / 3600, 1), "content": b["content"]}
         return None
 
+    def _macro_events(self):
+        """Twice-daily You.com scan for scheduled binary events (CPI/PCE/FOMC/NFP/major unlocks) -> machine-readable
+        caution windows for the FREE gate, plus a one-call post-event outcome/stance line for the proposer."""
+        from . import ydc
+        if not ydc.key():
+            return None
+        st = self.state.get("macro_events") or {}
+        now = time.time()
+        if now - (st.get("ts") or 0) >= 12 * 3600:
+            try:
+                ya = ydc.answer(
+                    "List scheduled macro events in the NEXT 72 HOURS that can move crypto (CPI, PCE, FOMC/rate "
+                    "decisions, NFP, major token unlocks, ETF deadlines). Reply ONLY a JSON array, each item "
+                    "{\"name\":\"...\",\"utc\":\"YYYY-MM-DDTHH:MMZ\",\"consensus\":\"one short line\","
+                    "\"importance\":\"high|medium\"}. If the exact time is unknown use 13:30Z for US data. No prose.")
+                import re as _re
+                txt = (ya or {}).get("answer") or ""
+                m = _re.search(r"\[.*\]", txt, _re.S)
+                evs = []
+                for e in (json.loads(m.group(0)) if m else []):
+                    try:
+                        ts = time.mktime(time.strptime(str(e["utc"]).replace("Z", ""), "%Y-%m-%dT%H:%M")) - time.timezone
+                        evs.append({"name": str(e.get("name"))[:60], "ts": ts, "consensus": str(e.get("consensus", ""))[:120],
+                                    "importance": e.get("importance", "medium")})
+                    except Exception:
+                        continue
+                names = {e["name"] for e in evs}
+                keep = [e for e in (st.get("events") or []) if e.get("stance") and now - (e.get("ts") or 0) < 24 * 3600 and e["name"] not in names]
+                st = {"ts": now, "events": evs + keep}
+                self.state.set("macro_events", st)
+                log.info(f"[dim]macro events refreshed: {len(evs)} upcoming[/]")
+            except Exception as e:
+                log.warning(f"macro events: {e}")
+        for e in (st.get("events") or []):     # post-event: ONE cached call for the actual outcome + reaction
+            if 0 < now - (e.get("ts") or 0) < 12 * 3600 and not e.get("stance"):
+                try:
+                    ya = ydc.answer(f"{e['name']} result: what was the ACTUAL outcome vs consensus ({e.get('consensus', '')}) and the "
+                                    f"immediate risk-asset/crypto reaction? One sentence: outcome=..., reaction=risk-on|risk-off|muted.")
+                    e["stance"] = (ya or {}).get("answer", "unavailable")[:200] or "unavailable"
+                except Exception:
+                    e["stance"] = "unavailable"
+                self.state.set("macro_events", st)
+                log.info(f"[dim]event stance: {e['name']}: {str(e.get('stance'))[:80]}[/]")
+        now2 = time.time()
+        up = [{"name": e["name"], "in_h": round((e["ts"] - now2) / 3600, 1), "consensus": e["consensus"], "importance": e["importance"]}
+              for e in (st.get("events") or []) if 0 < e["ts"] - now2 < 24 * 3600][:5]
+        past = [{"name": e["name"], "h_ago": round((now2 - e["ts"]) / 3600, 1), "stance": e["stance"]}
+                for e in (st.get("events") or []) if e.get("stance") and 0 < now2 - e["ts"] < 12 * 3600][:3]
+        out = {}
+        if up: out["upcoming"] = up
+        if past: out["recent_outcomes"] = past
+        return out or None
+
     def _pm_due(self, snap: AccountSnapshot, prices: Dict[str, float]) -> bool:
         """Prediction markets run on their OWN cadence, separate from perps: every pm_interval_min, or sooner if a held
         token moved >= pm_move_trigger_pct, or a held PM position has no stop/target yet."""
@@ -908,6 +961,12 @@ class Agent:
             brief = self._market_brief()
             if brief:
                 market_prompt["analyst_brief"] = brief
+            try:
+                ev = self._macro_events()
+                if ev:
+                    market_prompt["macro_events"] = ev
+            except Exception:
+                log.exception("macro events")
         self._mark_shown(shown, prices, market)
         if pm_due:
             self.state.set("last_pm_ts", time.time())
@@ -1012,15 +1071,23 @@ class Agent:
                     pmc = self.cfg.universe.prediction_markets
                     edge = (va.confidence or 0) - (va.limit_price or 0)
                     is_swing = va.stop_loss_px is not None and va.take_profit_px is not None
-                    if meta and not is_swing and not parse_price_market(meta.get("question", "")) and edge > pmc.max_research_edge:
+                    # DOUBLE-SOURCE VERIFICATION: any research edge > 0.20 or confidence >= 0.90 (the mismap
+                    # signature) must survive a skeptical Gemini+You.com re-check, swing trades included, and the
+                    # two probability estimates must agree within 15 points - else the trade is rejected.
+                    needs_check = meta and not parse_price_market(meta.get("question", "")) and \
+                        (edge > pmc.max_research_edge or edge > 0.20 or (va.confidence or 0) >= 0.90)
+                    if needs_check:
                         v = self.researcher.verify(meta, va.confidence, va.outcome or "Yes")
-                        if v and v.get("agree") and v.get("verified_outcome") and (v["prob_yes"] - (va.limit_price or 0)) > pmc.max_research_edge and v.get("confidence", 0) >= 0.7:
-                            va = va.model_copy()
-                            va.confidence = round((va.limit_price or 0) + pmc.max_research_edge, 3)
-                            self.notify.send(f"EDGE VERIFIED {va.outcome}: 2nd search confirms - taking, sized on capped edge", "warning")
+                        agreed = bool(v and v.get("agree") and v.get("verified_outcome") and v.get("confidence", 0) >= 0.7)
+                        diverged = (not v) or abs((v.get("prob_yes") or 0) - (va.confidence or 0)) > 0.15
+                        if agreed and not diverged:
+                            if edge > pmc.max_research_edge:       # huge claimed edges still trade on the CAPPED edge
+                                va = va.model_copy()
+                                va.confidence = round((va.limit_price or 0) + pmc.max_research_edge, 3)
+                                self.notify.send(f"EDGE VERIFIED {va.outcome}: 2nd source confirms - taking, sized on capped edge", "warning")
                         else:
                             vs = (v or {}).get("summary", "no result")
-                            _reject(va, f"implausible edge {edge:+.2f} NOT confirmed on re-check: {vs[:70]}", "rr_model")
+                            _reject(va, f"PM edge {edge:+.2f} failed double-source check (agree={agreed} diverged={diverged}): {vs[:70]}", "rr_model")
                             continue
                 mult = self.learner.size_multiplier(va, regime) * self._throttle_mult()
                 rrv = self.rr.assess(va, snap, entry_ref, mult, self.md.pm_meta, {c2: v2.get("mark") for c2, v2 in market.get("perps", {}).items()})
