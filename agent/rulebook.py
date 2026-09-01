@@ -88,7 +88,7 @@ class RuleBook:
                         b["pending"].remove(pd)
                         if coin not in b["positions"] and len(b["positions"]) < MAX_POS:
                             b["cash"] -= pd["notional"] * FEE_IN
-                            b["positions"][coin] = {"side": pd["side"], "entry": pd["limit"], "stop": pd["stop"],
+                            b["positions"][coin] = {"side": pd["side"], "strat": pd.get("strat", "pullback"), "entry": pd["limit"], "stop": pd["stop"],
                                                     "tp": pd["tp"], "notional": pd["notional"], "risk_usd": pd["risk_usd"],
                                                     "opened_ts": now, "deadline_ts": now + TIME_STOP_H * 3600}
                             log.info(f"[dim]RULE-BOOK fill: {pd['side']} {coin} @ {pd['limit']:.6g}[/]")
@@ -107,7 +107,7 @@ class RuleBook:
                         pnl = p["notional"] * sig * (exit_px - p["entry"]) / p["entry"] - p["notional"] * FEE_OUT
                         b["cash"] += pnl
                         r = pnl / p["risk_usd"] if p["risk_usd"] else 0
-                        b["trades"].append({"coin": coin, "side": p["side"], "entry": p["entry"], "exit": exit_px,
+                        b["trades"].append({"coin": coin, "side": p["side"], "strat": p.get("strat", "pullback"), "entry": p["entry"], "exit": exit_px,
                                             "r": round(r, 2), "pnl": round(pnl, 2), "why": why, "ts": now})
                         del b["positions"][coin]
                         log.info(f"[dim]RULE-BOOK {why}: {p['side']} {coin} {r:+.2f}R (${pnl:+.2f})[/]")
@@ -120,24 +120,34 @@ class RuleBook:
                 rs = _rsi(C)
                 trs = [max(H[i] - L[i], abs(H[i] - C[i - 1]), abs(L[i] - C[i - 1])) for i in range(1, len(C))]
                 atr = sum(trs[-14:]) / min(14, len(trs))
-                if not rs or not (35 <= rs <= 65) or not atr:
+                if not rs or not atr:
                     continue
-                side = None
-                if e20 > e50 and last > s50 and lo <= e20 * 1.003 and last >= e20 * 0.997:
-                    side = "long"
-                elif e20 < e50 and last < s50 and hi >= e20 * 0.997 and last <= e20 * 1.003:
-                    side = "short"
+                # two tagged signal streams, one position per coin:
+                #   pullback (backtest +0.024R/t): touch of the EMA20 in trend, RSI 35-65, limit AT the EMA
+                #   deepfade (backtest +0.124R/t): same trend, limit a FULL ATR beyond the EMA - patience is the edge
+                side = None; strat = "pullback"; limit_px = e20
+                if 35 <= rs <= 65:
+                    if e20 > e50 and last > s50 and lo <= e20 * 1.003 and last >= e20 * 0.997:
+                        side = "long"
+                    elif e20 < e50 and last < s50 and hi >= e20 * 0.997 and last <= e20 * 1.003:
+                        side = "short"
+                if not side:
+                    if e20 > e50 and last > s50 and rs < 45:
+                        side, strat, limit_px = "long", "deepfade", e20 - 1.0 * atr
+                    elif e20 < e50 and last < s50 and rs > 55:
+                        side, strat, limit_px = "short", "deepfade", e20 + 1.0 * atr
                 if not side:
                     continue
                 eq = self.equity(prices)
                 risk_usd = eq * RISK_PCT / 100
-                risk_frac = ATR_MULT * atr / e20
+                risk_frac = ATR_MULT * atr / limit_px
                 notional = min(risk_usd / risk_frac, eq * MAX_NOTIONAL_X)
                 sig = 1 if side == "long" else -1
-                b["pending"].append({"coin": coin, "side": side, "limit": e20, "stop": e20 - sig * ATR_MULT * atr,
-                                     "tp": e20 + sig * RR_MULT * ATR_MULT * atr, "notional": round(notional, 2),
+                b["pending"].append({"coin": coin, "side": side, "strat": strat, "limit": limit_px,
+                                     "stop": limit_px - sig * ATR_MULT * atr,
+                                     "tp": limit_px + sig * RR_MULT * ATR_MULT * atr, "notional": round(notional, 2),
                                      "risk_usd": round(notional * risk_frac, 2), "expires_ts": now + LIMIT_TTL_H * 3600})
-                log.info(f"[dim]RULE-BOOK signal: {side} {coin} limit {e20:.6g} stop {e20 - sig * ATR_MULT * atr:.6g}[/]")
+                log.info(f"[dim]RULE-BOOK signal [{strat}]: {side} {coin} limit {limit_px:.6g} stop {limit_px - sig * ATR_MULT * atr:.6g}[/]")
             except Exception:
                 log.exception(f"rule book {coin}")
         b["trades"] = b["trades"][-200:]
