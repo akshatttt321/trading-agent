@@ -498,7 +498,17 @@ class Brain:
                    "A veto marked MISTAKE means you blocked a winner - it is evidence to APPROVE comparable setups, "
                    "NEVER precedent to veto them again. Do not cite this section as a reason to veto.\n"
                    + "\n".join(f"- {o}" for o in veto_outcomes) + "\n")
-        msg = user_msg + "\n\n## PROPOSED ACTIONS TO REVIEW\n" + VERIFY_RULES + acc + json.dumps(proposal, separators=(",", ":"))
+        # TRIMMED VERIFIER CONTEXT: the judge needs the account, the limits block (trend ladder), a breadth
+        # digest, the rules, its accountability record and the SIZED proposals with code-verified metrics -
+        # NOT the full per-coin market JSON or cycle history (that alone was ~60% of its input bill).
+        vmsg = user_msg
+        mi = vmsg.find("\n\n## MARKET DATA\n")
+        if mi >= 0:
+            import re as _re
+            rest = vmsg[mi:]
+            keep = [m.group(0) for m in (_re.search(r'"direction":\{[^{}]*\}', rest), _re.search(r'"session":\{[^{}]*\}', rest)) if m]
+            vmsg = vmsg[:mi] + ("\n\n## MARKET DIGEST\n{" + ",".join(keep) + "}" if keep else "")
+        msg = vmsg + "\n\n## PROPOSED ACTIONS TO REVIEW\n" + VERIFY_RULES + acc + json.dumps(proposal, separators=(",", ":"))
         c = self._call(self.verifier, self.verifier_system, msg, VERDICT_SCHEMA, "submit_verdicts")
         self.last_verify_failed = bool(c.error or not c.data)
         if c.error or not c.data:

@@ -181,12 +181,25 @@ class OpenAIProvider(Provider):
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 response_format={"type": "json_schema", "json_schema": {"name": tool_name, "schema": schema, "strict": False}},
             )
-            # newer reasoning models reject temperature / max_tokens; try full, then minimal
+            if self.thinking in ("minimal", "low", "medium", "high"):
+                kwargs["reasoning_effort"] = self.thinking      # cap thinking spend; stripped below if rejected
+            # newer reasoning models reject temperature / max_tokens / reasoning_effort; degrade gracefully
             try:
                 resp = self.client.chat.completions.create(temperature=self.temperature, max_completion_tokens=self.max_tokens, **kwargs)
             except Exception as e:
-                if "temperature" in str(e) or "max_completion_tokens" in str(e) or "unsupported" in str(e).lower():
-                    resp = self.client.chat.completions.create(**kwargs)
+                es = str(e).lower()
+                if "reasoning" in es or "effort" in es:
+                    kwargs.pop("reasoning_effort", None)
+                    resp = self.client.chat.completions.create(temperature=self.temperature, max_completion_tokens=self.max_tokens, **kwargs)
+                elif "temperature" in str(e) or "max_completion_tokens" in str(e) or "unsupported" in es:
+                    try:
+                        resp = self.client.chat.completions.create(**kwargs)
+                    except Exception as e2:
+                        if "reasoning" in str(e2).lower() or "effort" in str(e2).lower():
+                            kwargs.pop("reasoning_effort", None)
+                            resp = self.client.chat.completions.create(**kwargs)
+                        else:
+                            raise
                 else:
                     raise
             u = resp.usage
