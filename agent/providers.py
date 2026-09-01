@@ -192,12 +192,17 @@ class OpenAIProvider(Provider):
                     kwargs.pop("reasoning_effort", None)
                     resp = self.client.chat.completions.create(temperature=self.temperature, max_completion_tokens=self.max_tokens, **kwargs)
                 elif "temperature" in str(e) or "max_completion_tokens" in str(e) or "unsupported" in es:
+                    # NEVER retry uncapped: a reasoning model with no output cap free-writes thousands of tokens
+                    # (observed: 8.3k-token manager replies whenever attempt 1 hit a transient channel error).
                     try:
-                        resp = self.client.chat.completions.create(**kwargs)
+                        resp = self.client.chat.completions.create(max_tokens=self.max_tokens, **kwargs)
                     except Exception as e2:
-                        if "reasoning" in str(e2).lower() or "effort" in str(e2).lower():
+                        es2 = str(e2).lower()
+                        if "reasoning" in es2 or "effort" in es2:
                             kwargs.pop("reasoning_effort", None)
-                            resp = self.client.chat.completions.create(**kwargs)
+                            resp = self.client.chat.completions.create(max_tokens=self.max_tokens, **kwargs)
+                        elif "max_tokens" in str(e2):
+                            resp = self.client.chat.completions.create(**kwargs)      # true last resort
                         else:
                             raise
                 else:
