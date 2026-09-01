@@ -181,7 +181,11 @@ class OpenAIProvider(Provider):
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 response_format={"type": "json_schema", "json_schema": {"name": tool_name, "schema": schema, "strict": False}},
             )
-            if self.thinking in ("minimal", "low", "medium", "high"):
+            if self.thinking == "minimal" and self.name in ("openrouter", "agentrouter"):
+                # hybrid models (deepseek-v3.2 etc.): "minimal" = reasoning OFF entirely. Some channels otherwise
+                # self-enable thinking and free-write 3-8k tokens (verified live); enabled:false pins it to 0.
+                kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+            elif self.thinking in ("low", "medium", "high"):
                 kwargs["reasoning_effort"] = self.thinking      # cap thinking spend; stripped below if rejected
             # newer reasoning models reject temperature / max_tokens / reasoning_effort; degrade gracefully
             try:
@@ -189,7 +193,7 @@ class OpenAIProvider(Provider):
             except Exception as e:
                 es = str(e).lower()
                 if "reasoning" in es or "effort" in es:
-                    kwargs.pop("reasoning_effort", None)
+                    kwargs.pop("reasoning_effort", None); kwargs.pop("extra_body", None)
                     resp = self.client.chat.completions.create(temperature=self.temperature, max_completion_tokens=self.max_tokens, **kwargs)
                 elif "temperature" in str(e) or "max_completion_tokens" in str(e) or "unsupported" in es:
                     # NEVER retry uncapped: a reasoning model with no output cap free-writes thousands of tokens
@@ -199,7 +203,7 @@ class OpenAIProvider(Provider):
                     except Exception as e2:
                         es2 = str(e2).lower()
                         if "reasoning" in es2 or "effort" in es2:
-                            kwargs.pop("reasoning_effort", None)
+                            kwargs.pop("reasoning_effort", None); kwargs.pop("extra_body", None)
                             resp = self.client.chat.completions.create(max_tokens=self.max_tokens, **kwargs)
                         elif "max_tokens" in str(e2):
                             resp = self.client.chat.completions.create(**kwargs)      # true last resort
