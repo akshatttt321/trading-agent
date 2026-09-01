@@ -63,9 +63,14 @@ class RuleBook:
         if hour == b.get("last_hour"):
             return
         b["last_hour"] = hour
-        # IN-SAMPLE TUNED subset: the only coins persistently positive across all 8 backtest variants (75d).
-        # Full-universe versions of this rule LOSE (-0.17R/trade) - this book is a benchmark, not a proven edge.
-        coins = ["ZRO", "kPEPE", "WLD", "ENA", "TRUMP", "UNI", "FARTCOIN", "DOGE"]
+        # BUCKETED UNIVERSE from the 12-strategy x 177-coin x 150d matrix (matrix.json):
+        # BOTH = double-positive in pullback AND deepfade; *_ONLY = matched to their one proven style.
+        # Selection stays in-sample-tuned - the strat-tagged live scoreboard is the out-of-sample judge.
+        BOTH = ["ZRO", "ENA", "ALT", "HEMI", "HMSTR"]
+        PB_ONLY = ["WLD", "FARTCOIN", "CRV", "COMP", "BABY"]
+        DF_ONLY = ["kPEPE", "BRETT", "UNI", "MEGA", "NXPC"]
+        PB_SET, DF_SET = set(BOTH + PB_ONLY), set(BOTH + DF_ONLY)
+        coins = BOTH + PB_ONLY + DF_ONLY
         now = time.time()
         for coin in coins:
             try:
@@ -126,12 +131,12 @@ class RuleBook:
                 #   pullback (backtest +0.024R/t): touch of the EMA20 in trend, RSI 35-65, limit AT the EMA
                 #   deepfade (backtest +0.124R/t): same trend, limit a FULL ATR beyond the EMA - patience is the edge
                 side = None; strat = "pullback"; limit_px = e20
-                if 35 <= rs <= 65:
+                if coin in PB_SET and 35 <= rs <= 65:
                     if e20 > e50 and last > s50 and lo <= e20 * 1.003 and last >= e20 * 0.997:
                         side = "long"
                     elif e20 < e50 and last < s50 and hi >= e20 * 0.997 and last <= e20 * 1.003:
                         side = "short"
-                if not side:
+                if not side and coin in DF_SET:
                     if e20 > e50 and last > s50 and rs < 45:
                         side, strat, limit_px = "long", "deepfade", e20 - 1.0 * atr
                     elif e20 < e50 and last < s50 and rs > 55:
