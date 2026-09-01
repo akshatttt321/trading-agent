@@ -1051,6 +1051,33 @@ class Agent:
         # verifier only sees what the gate let through (adds to a held same-side position skip it).
         # INDEX-keyed end to end: indices < n_pending are entries, >= n_pending are loss exits.
         held = {(p.coin, "long" if p.size > 0 else "short") for p in snap.perps}
+        # VERIFIER APPROVAL CACHE: the proposer often re-submits the same limit idea (same coin+side+levels,
+        # only size/leverage tweaked) after a TTL expiry or cancel-replace. Re-buying the same verdict burns
+        # credits: an approval stays valid 6h for the same signature (levels within 0.5%); the free gates and
+        # the RR model still re-validate the new size every time. Vetoes are NOT cached (cooldown covers those).
+        now_c = time.time()
+        vcache = [e for e in (self.state.get("verifier_ok_cache") or []) if now_c - e.get("ts", 0) < 6 * 3600]
+
+        def _sig_match(a_) -> bool:
+            if a_.kind not in ("open_perp", "pm_buy"):
+                return False
+            for e in vcache:
+                if e.get("kind") != a_.kind or e.get("coin") != (a_.coin or a_.outcome) or e.get("side") != (a_.side or "buy"):
+                    continue
+                ok = True
+                for f in ("limit_price", "stop_loss_px", "take_profit_px"):
+                    v, w = getattr(a_, f, None), e.get(f)
+                    if v is None and w is None:
+                        continue
+                    if v is None or not w or abs(v - w) / abs(w) > 0.005:
+                        ok = False
+                        break
+                if ok:
+                    return True
+            return False
+
+        cached_ok = [p_ for p_ in pending if _sig_match(p_[0])]
+        pending = [p_ for p_ in pending if not _sig_match(p_[0])]
         to_verify = [p_[0] for p_ in pending] + [act for act, _ in loss_exits]
         n_pending = len(pending)
         vouts = [(f"{t.get('coin')} {t.get('side')}: you vetoed it and it then {'hit its target' if t.get('status') == 'target' else t.get('status')} "
@@ -1081,6 +1108,19 @@ class Agent:
                 continue
             reason_x = pending[i][1] + (f" | recheck: {recheck.reason}" if "->" in (recheck.reason or "") else "")
             _execute(recheck.action, reason_x, pending[i][2])
+        for i, act in approved:                                    # remember fresh approvals for the 6h cache
+            if i < n_pending and act.kind in ("open_perp", "pm_buy"):
+                vcache.append({"kind": act.kind, "coin": act.coin or act.outcome, "side": act.side or "buy", "ts": now_c,
+                               "limit_price": act.limit_price, "stop_loss_px": act.stop_loss_px, "take_profit_px": act.take_profit_px})
+        self.state.set("verifier_ok_cache", vcache[-20:])
+        for va_c, reason_c, risk_c in cached_ok:                   # cache hits: same recheck path, zero review cost
+            snap = self.snapshot(prices)
+            recheck = self.risk.evaluate(va_c, snap, cycle_start_ts, funding, regime, market)
+            if not recheck.approved:
+                _reject(va_c, recheck.reason, "risk_gate")
+                continue
+            log.info(f"[dim]verifier cache: {va_c.coin or va_c.outcome} {va_c.side or ''} matches an approval <6h old - paid review skipped[/]")
+            _execute(recheck.action, reason_c + " | verifier-cache (matched recent approval)", risk_c)
 
         self._account_tokens()
         if not pm_scope:                                      # a PM review says nothing about perp-market quietness
