@@ -156,7 +156,7 @@ class RiskGate:
                         return Verdict(True, f"stop widened {cur_stop}->{new_stop} (widen {used + 1}/2 for this trade)", a)
                     if not tighter:
                         return Verdict(True, "risk-reducing (stop unchanged / target adjust)", a)   # no-op on stop: allow
-                init_risk = abs(pos.entry_px - (pos.stop_px or pos.entry_px)) or (pos.entry_px * self.r.max_stop_distance_pct / 100)
+                init_risk = abs(pos.entry_px - ((getattr(pos, "init_stop_px", None) or pos.stop_px) or pos.entry_px)) or (pos.entry_px * self.r.max_stop_distance_pct / 100)
                 r_now = ((pos.mark_px - pos.entry_px) if is_long else (pos.entry_px - pos.mark_px)) / init_risk if init_risk else 0
                 at_or_beyond_be = (a.stop_loss_px >= pos.entry_px) if is_long else (a.stop_loss_px <= pos.entry_px)
                 # earning BREAKEVEN: a stop at/beyond entry may only be set once the trade has earned it - the
@@ -179,7 +179,7 @@ class RiskGate:
                     long = pos.size > 0
                     extending = a.take_profit_px > pos.tp_px if long else a.take_profit_px < pos.tp_px
                     if extending:
-                        init_risk = abs(pos.entry_px - (pos.stop_px or pos.entry_px)) or (pos.entry_px * self.r.max_stop_distance_pct / 100)
+                        init_risk = abs(pos.entry_px - ((getattr(pos, "init_stop_px", None) or pos.stop_px) or pos.entry_px)) or (pos.entry_px * self.r.max_stop_distance_pct / 100)
                         r_now = ((pos.mark_px - pos.entry_px) if long else (pos.entry_px - pos.mark_px)) / init_risk if init_risk else 0
                         new_stop = a.stop_loss_px if a.stop_loss_px is not None else pos.stop_px
                         locked = (new_stop is not None) and ((new_stop >= pos.entry_px) if long else (new_stop <= pos.entry_px))

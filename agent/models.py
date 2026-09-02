@@ -62,6 +62,7 @@ class PerpPosition(BaseModel):
     liquidation_px: Optional[float] = None
     stop_px: Optional[float] = None
     tp_px: Optional[float] = None
+    init_stop_px: Optional[float] = None   # stop at entry time: the R denominator (widens must not deflate R)
 
 
 class SpotBalance(BaseModel):

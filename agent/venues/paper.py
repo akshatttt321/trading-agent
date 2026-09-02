@@ -45,7 +45,7 @@ class PaperVenue(Venue):
             unreal += upnl
             margin_used += notional / pos["leverage"]
             liq = pos["entry_px"] * (1 - 0.9 / pos["leverage"]) if pos["size"] > 0 else pos["entry_px"] * (1 + 0.9 / pos["leverage"])
-            perps.append(PerpPosition(coin=coin, size=pos["size"], entry_px=pos["entry_px"], mark_px=mark, notional_usd=notional,
+            perps.append(PerpPosition(coin=coin, size=pos["size"], entry_px=pos["entry_px"], mark_px=mark, notional_usd=notional, init_stop_px=pos.get("init_stop"),
                                       unrealized_pnl=upnl, leverage=pos["leverage"], liquidation_px=liq,
                                       stop_px=pos.get("stop_px"), tp_px=pos.get("tp_px")))
         spot_val = 0.0

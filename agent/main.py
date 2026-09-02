@@ -1091,6 +1091,26 @@ class Agent:
                             vs = (v or {}).get("summary", "no result")
                             _reject(va, f"PM edge {edge:+.2f} failed double-source check (agree={agreed} diverged={diverged}): {vs[:70]}", "rr_model")
                             continue
+                # S/R-SNAP TP: a target a few ticks past a computed level is a give-back machine (backtested:
+                # win 17%->39%, +0.36R/trade on identical entries). Pull the TP just INSIDE the first S/R level
+                # between entry and target; never push a target further out.
+                if va.kind == "open_perp" and va.take_profit_px and entry_ref:
+                    try:
+                        _mdc = (market.get("perps", {}) or {}).get(va.coin) or {}
+                        _lvls = _mdc.get("resistance_1h") if va.side == "long" else _mdc.get("support_1h")
+                        if _lvls:
+                            _sig = 1 if va.side == "long" else -1
+                            _inside = [x for x in _lvls if (entry_ref < x < va.take_profit_px) if _sig == 1] if _sig == 1 \
+                                else [x for x in _lvls if (va.take_profit_px < x < entry_ref)]
+                            if _inside:
+                                _lvl = min(_inside) if _sig == 1 else max(_inside)
+                                _new = round(_lvl * (0.999 if _sig == 1 else 1.001), 10)
+                                if _sig * (_new - entry_ref) > 0:
+                                    va = va.model_copy()
+                                    va.take_profit_px = _new
+                                    log.info(f"[dim]tp snapped to S/R: {va.coin} {va.side} tp -> {_new:.6g} (level {_lvl:.6g})[/]")
+                    except Exception:
+                        pass
                 mult = self.learner.size_multiplier(va, regime) * self._throttle_mult()
                 rrv = self.rr.assess(va, snap, entry_ref, mult, self.md.pm_meta, {c2: v2.get("mark") for c2, v2 in market.get("perps", {}).items()})
                 if not rrv.ok:
