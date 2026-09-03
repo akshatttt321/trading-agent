@@ -12,6 +12,7 @@ RR_MULT = 2.0            # backtest winner: V0 pullback @2.0R TP on the mover su
 RISK_PCT = 5.0           # % of rule-book equity risked per trade
 MAX_POS = 6
 MAX_NOTIONAL_X = 2.0     # per-position notional cap vs book equity
+LEVERAGE = 10            # perp leverage for margin display (1.75x-ATR ~4% stop is safe at 10x)
 FEE_IN, FEE_OUT = 0.00015, 0.00125
 LIMIT_TTL_H, TIME_STOP_H = 3, 48
 
@@ -138,6 +139,7 @@ class RuleBook:
                             b["cash"] -= pd["notional"] * FEE_IN
                             b["positions"][coin] = {"side": pd["side"], "strat": pd.get("strat", "pullback"), "entry": pd["limit"], "stop": pd["stop"],
                                                     "tp": pd["tp"], "notional": pd["notional"], "risk_usd": pd["risk_usd"],
+                                                    "leverage": pd.get("leverage", LEVERAGE), "margin_usd": pd.get("margin_usd", round(pd["notional"] / LEVERAGE, 2)),
                                                     "opened_ts": now, "deadline_ts": now + TIME_STOP_H * 3600}
                             log.info(f"[dim]RULE-BOOK fill: {pd['side']} {coin} @ {pd['limit']:.6g}[/]")
                 # ---- manage open position on candle extremes (stop checked first: conservative) ----
@@ -207,6 +209,7 @@ class RuleBook:
                 b["pending"].append({"coin": coin, "side": side, "strat": strat, "limit": limit_px,
                                      "stop": limit_px - sig * ATR_MULT * atr,
                                      "tp": limit_px + sig * RR_MULT * ATR_MULT * atr, "notional": round(notional, 2),
+                                     "leverage": LEVERAGE, "margin_usd": round(notional / LEVERAGE, 2),
                                      "risk_usd": round(notional * risk_frac, 2), "expires_ts": now + LIMIT_TTL_H * 3600})
                 log.info(f"[dim]RULE-BOOK signal [{strat}]: {side} {coin} limit {limit_px:.6g} stop {limit_px - sig * ATR_MULT * atr:.6g}[/]")
             except Exception:
