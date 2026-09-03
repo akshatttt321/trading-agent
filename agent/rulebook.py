@@ -194,6 +194,9 @@ class RuleBook:
         b["trades"] = b["trades"][-200:]
         eq = self.equity(prices)
         b["equity"] = round(eq, 2)                              # stamped for the dashboard
+        hist = b.get("equity_hist") or []
+        hist.append([int(now), round(eq, 2)])                  # (ts, equity) time-series for the dashboard chart
+        b["equity_hist"] = hist[-600:]
         for c, p_ in b["positions"].items():
             px = prices.get(c) or p_["entry"]
             sgn = 1 if p_["side"] == "long" else -1
