@@ -1043,6 +1043,11 @@ class Agent:
             if a.kind == "hold":
                 log.info(f"HOLD - {a.reason}")
                 continue
+            # V3: when perp entries are code-driven (rule engine), the LLM no longer opens perps/spot - it keeps
+            # PM trading, position management and regime reading. New perp/spot entries from the LLM are dropped.
+            if not self.cfg.llm.perp_entries_enabled and a.kind in ("open_perp", "spot_buy"):
+                log.info(f"[dim]v3: LLM {a.kind} {a.coin} dropped - perps are code-driven (rule engine)[/]")
+                continue
             if a.kind in PM_KINDS and a.token_id:
                 if a.token_id in pm_tokens:
                     a.token_id = pm_tokens[a.token_id]          # T3 -> real 77-digit token id

@@ -7,7 +7,7 @@ import logging
 
 log = logging.getLogger("agent")
 
-ATR_MULT = 1.5
+ATR_MULT = 1.75            # sound geometry: 365d backtest optimum (kills the tight-stop -0.83R class)
 RR_MULT = 2.0            # backtest winner: V0 pullback @2.0R TP on the mover subset (+8.6R/483t, 75d)
 RISK_PCT = 5.0           # % of rule-book equity risked per trade
 MAX_POS = 6
@@ -56,13 +56,36 @@ class RuleBook:
             eq += p["notional"] * sig * (px - p["entry"]) / p["entry"]
         return eq
 
+    def _daily_trend(self, coin: str, now: float) -> int:
+        """+1/-1/0 daily trend from closed 1D candles (ema20 vs ema50, price vs sma50). Cached ~6h per coin."""
+        cache = self.state.get("rb_daily_trend") or {}
+        e = cache.get(coin)
+        if e and now - e.get("ts", 0) < 6 * 3600:
+            return e["dir"]
+        try:
+            end = int(now * 1000)
+            ks = self.md.info.candles_snapshot(coin, "1d", end - 210 * 24 * 3600 * 1000, end)
+            if float(ks[-1].get("T") or 0) > now * 1000:
+                ks = ks[:-1]
+            C = [float(k["c"]) for k in ks]
+            if len(C) < 55:
+                d = 0
+            else:
+                e20 = _ema(C, 20)[-1]; e50 = _ema(C, 50)[-1]; s50 = sum(C[-50:]) / 50
+                d = 1 if (e20 > e50 and C[-1] > s50) else -1 if (e20 < e50 and C[-1] < s50) else 0
+        except Exception:
+            d = 0
+        cache[coin] = {"dir": d, "ts": now}
+        self.state.set("rb_daily_trend", cache)
+        return d
+
     def hourly(self, prices):
         """Run once per closed 1h candle: manage fills/stops on candle extremes, then scan for new signals."""
         b = self._book()
-        hour = int(time.time() // 3600)
-        if hour == b.get("last_hour"):
+        slot = int(time.time() // 7200)                        # 2h base timeframe (timeframe sweep peak)
+        if slot == b.get("last_hour"):
             return
-        b["last_hour"] = hour
+        b["last_hour"] = slot
         # BUCKETED UNIVERSE from the 12-strategy x 177-coin x 150d matrix (matrix.json):
         # BOTH = double-positive in pullback AND deepfade; *_ONLY = matched to their one proven style.
         # Selection stays in-sample-tuned - the strat-tagged live scoreboard is the out-of-sample judge.
@@ -75,7 +98,7 @@ class RuleBook:
         for coin in coins:
             try:
                 end = int(now * 1000)
-                ks = self.md.info.candles_snapshot(coin, "1h", end - 12 * 24 * 3600 * 1000, end)
+                ks = self.md.info.candles_snapshot(coin, "2h", end - 30 * 24 * 3600 * 1000, end)
                 if not ks or len(ks) < 60:
                     continue
                 if float(ks[-1].get("T") or 0) > now * 1000:      # drop the live partial candle
@@ -130,6 +153,7 @@ class RuleBook:
                 # two tagged signal streams, one position per coin:
                 #   pullback (backtest +0.024R/t): touch of the EMA20 in trend, RSI 35-65, limit AT the EMA
                 #   deepfade (backtest +0.124R/t): same trend, limit a FULL ATR beyond the EMA - patience is the edge
+                d1 = self._daily_trend(coin, now)                 # +1 up / -1 down / 0 flat (closed 1D candles)
                 side = None; strat = "pullback"; limit_px = e20
                 if coin in PB_SET and 35 <= rs <= 65:
                     if e20 > e50 and last > s50 and lo <= e20 * 1.003 and last >= e20 * 0.997:
@@ -143,10 +167,22 @@ class RuleBook:
                         side, strat, limit_px = "short", "deepfade", e20 + 1.0 * atr
                 if not side:
                     continue
+                # 1D-TREND FILTER (the proven edge, +0.05R/trade, flips the universe positive): a mover-pullback
+                # only trades WITH the daily trend. Counter-daily-trend momentum entries are the losers.
+                if (side == "long" and d1 < 0) or (side == "short" and d1 > 0):
+                    continue
                 eq = self.equity(prices)
+                # V3 RISK FENCE: book gross notional <= 300% equity, same-direction positions <= 4 (the uncapped
+                # ~960% short basket is what round-tripped the +37% back to breakeven).
+                open_gross = sum(pp["notional"] for pp in b["positions"].values()) + sum(pd["notional"] for pd in b["pending"])
+                same_dir = sum(1 for pp in b["positions"].values() if pp["side"] == side) + sum(1 for pd in b["pending"] if pd["side"] == side)
+                if same_dir >= 4:
+                    continue
                 risk_usd = eq * RISK_PCT / 100
                 risk_frac = ATR_MULT * atr / limit_px
-                notional = min(risk_usd / risk_frac, eq * MAX_NOTIONAL_X)
+                notional = min(risk_usd / risk_frac, eq * MAX_NOTIONAL_X, max(0.0, eq * 3.0 - open_gross))
+                if notional < 10:
+                    continue
                 sig = 1 if side == "long" else -1
                 b["pending"].append({"coin": coin, "side": side, "strat": strat, "limit": limit_px,
                                      "stop": limit_px - sig * ATR_MULT * atr,

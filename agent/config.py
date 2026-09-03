@@ -23,6 +23,7 @@ class ModelRef(BaseModel):
 
 
 class LLMCfg(BaseModel):
+    perp_entries_enabled: bool = True   # v3: false -> rule engine trades perps, LLM does regime/PM only
     proposer: ModelRef = Field(default_factory=lambda: ModelRef(provider="gemini", model="gemini-3.5-flash-lite"))
     verifier: ModelRef = Field(default_factory=lambda: ModelRef(provider="gemini", model="gemini-3.6-flash", enabled=True))
     fallbacks: List[ModelRef] = Field(default_factory=lambda: [ModelRef(provider="gemini", model="gemini-3.5-flash-lite")])
