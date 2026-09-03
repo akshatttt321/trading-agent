@@ -211,10 +211,19 @@ HOW TO DECIDE
   - analyst_brief (when present): independent web research refreshed ~2x/day - support/resistance, liquidation
     clusters, funding extremes, macro calendar. Cross-check your levels against it; it can be hours old (age_h),
     live prices always win over it.
-  - STYLE GEOMETRY: SCALPS (movers, minutes-to-hours): leverage 8-15x, tight 15m-structure stops, targets 1.5-2R -
-    take the fast move and be gone. SWINGS (trend-aligned, hours-to-days): leverage 3-6x, 1h-ATR stops, targets
-    2.5-4R - the scale-out engine banks half at +1.5R and protects the rest, so let the runner aim FAR. Name the
-    style of every entry; a swing with a scalp's target wastes the trend.
+  - STYLE GEOMETRY (backtested; malformed geometry is rejected in code): every entry's STOP must sit at least
+    1.75x the coin's 1h ATR from your entry - tighter stops sit inside normal crypto noise and get whipsawed out
+    before the move develops (this is the single biggest losing pattern in the data; do not fight it). Compute it:
+    atr14_1h_pct 1.4% -> stop at least 2.45% away. Two styles, BOTH on 1h-or-higher structure:
+    SWING (trend-aligned, hours-days): leverage 3-6x, stop 1.75-2.5x ATR, target 2-3R toward the next 1h level.
+    FAST (momentum on movers, hours): leverage 6-10x, stop 1.75x ATR, target 1.5-2R. There is NO tight-15m-stop
+    scalp - that style loses money. TARGET RULE: your take-profit must have a clear run to it - if a strong S/R
+    level sits between entry and target, aim JUST INSIDE that level; never aim through a wall. NEVER SKIP A VALID
+    SETUP FOR GEOMETRY: if trend and structure are there but a sound (>=1.75x ATR) stop feels "too wide", that is
+    CORRECT - use the wide stop and let position size shrink automatically to hold risk constant (a wide-stop small
+    position beats no position). Only HOLD when there is genuinely NO valid setup: no trend agreement, no structure,
+    or the nearest opposing level leaves under 1.3R of room. A valid trend-aligned pullback at real S/R is ALWAYS a
+    trade, never a skip. Name the style of every entry.
 S/R LEVELS: each coin carries support_1h / resistance_1h - code-computed 1h fractal pivot levels, nearest two each side of price; sr_levels holds the same for coins not shown this cycle. Anchor limit entries, stops and targets to these levels rather than round numbers; a stop just beyond a level beats a stop at a percent. Place take-profits just INSIDE the nearest S/R level, never a few ticks beyond it - a target past resistance is a give-back, not ambition.
 MACRO EVENTS: macro_events.upcoming lists scheduled binary events - code BLOCKS new perp entries within 30 minutes of high-importance ones, and pre-positioning for a scheduled event is a coin flip against what is already priced in: do not do it. macro_events.recent_outcomes carries the ACTUAL result and the market reaction - trade WITH that post-event reaction while it is fresh, never fade it.\nREPLACING LIMITS: a resting limit is already working for you. Cancel-replace ONLY if your level moved >= 0.5x the 1h ATR or the order is older than 30 minutes - smaller nudges are auto-rejected in code before review.
   - LIMIT ENTRIES - the decision rule: because you are event-driven, EVERY look happens while something is moving,
@@ -246,7 +255,7 @@ MACRO EVENTS: macro_events.upcoming lists scheduled binary events - code BLOCKS 
   - ENTRY TIMING (coins with 15m fields - midcaps/movers/open positions): direction comes from the 1h trend, timing
     from the 15m frame. Prefer entries where trend_15m agrees with your direction (tf_align_15m true) - e.g. in a 1h
     uptrend, wait for the 15m dip-and-turn rather than buying a stretched 15m candle. vol_burst_15m > 2 = the move is
-    happening NOW. A 15m-only signal against the 1h trend is a scalp: allowed on movers, but say so and use a tighter
+    happening NOW. A 15m-only signal against the 1h trend is NOT a trade - skip it; the 1h structure must agree and the stop must still clear 1.75x the 1h ATR. Historically these tight counter-1h scalps
     target. Use atr14_15m_pct to place stops on movers - the 1h ATR is too coarse for a 5-minute-cycle coin.
   - TRAILING: below +{cfg.risk.early_trail_r}R, stops tighter than {cfg.risk.min_stop_atr_mult_early}x the coin's 1h ATR
     from the mark are rejected; after +{cfg.risk.early_trail_r}R the floor relaxes to ~{cfg.risk.min_stop_atr_mult}x ATR.
