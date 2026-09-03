@@ -913,6 +913,10 @@ class Agent:
             br = self.risk.breaker_status(snap, cycle_start_ts)
             if br:
                 quiet_reason = f"{br} - entry look skipped (free)"
+        if not quiet_reason and not self.cfg.llm.perp_entries_enabled:
+            # V3: the rule engine trades perps, so the LLM never does a full perp entry look. PM cadence (below)
+            # still converts due cycles into cheap PM-only looks; everything else is free.
+            quiet_reason = "v3: perps are code-driven - LLM entry look skipped (free)"
         pm_scope = False
         if quiet_reason and pm_due:
             # PM-SCOPED look: perps are quiet but the prediction-market cadence / move-trigger is due. Pay for a
