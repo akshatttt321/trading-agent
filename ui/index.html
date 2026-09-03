@@ -7,7 +7,7 @@
   <title>Trading Agent</title>
   <script>try{var t=localStorage.getItem('theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1115'/%3E%3Cpolyline points='4,24 11,17 16,20 22,10 28,13' fill='none' stroke='%233987e5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=20260903v3">
+  <link rel="stylesheet" href="style.css?v=20260903v3b">
 </head>
 <body>
 
@@ -63,6 +63,27 @@
       </div>
       <div class="re-kpis" id="re-kpis"></div>
     </div>
+
+    <!-- Rule-engine equity curve (status.rule_book.equity_hist). Green above start, red below; start baseline dashed.
+         Rendered by renderREChart() — reuses the main equity chart's Chart.js style, with a canvas fallback. -->
+    <div class="re-chart-head">
+      <h3 class="sub-head">Equity curve</h3>
+      <div class="panel-tools">
+        <span class="legend-key"><i class="swatch re-swatch-line" id="re-swatch-line"></i>equity</span>
+        <span class="legend-key"><i class="swatch swatch-dash"></i>start</span>
+        <span id="re-eq-range" class="muted small"></span>
+      </div>
+    </div>
+    <div class="chart-wrap re-chart-wrap">
+      <canvas id="re-equity-chart" role="img" aria-label="Rule engine equity over time"></canvas>
+      <div id="re-equity-empty" class="empty" hidden>building history…</div>
+    </div>
+
+    <!-- Realized (closed trades) vs unrealized (open uPnL) vs total (equity − start). -->
+    <div class="re-split" id="re-split"></div>
+
+    <h3 class="sub-head">Live positions <span class="count" id="re-live-count"></span></h3>
+    <div class="re-live-cards" id="re-live-cards"></div>
 
     <h3 class="sub-head">Open positions <span class="count" id="re-pos-count"></span></h3>
     <div class="table-wrap">
@@ -629,8 +650,8 @@
 <div id="help-pop" class="help-pop" hidden role="tooltip"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
-<script src="mock.js?v=20260903v3"></script>
-<script src="app.js?v=20260903v3"></script>
+<script src="mock.js?v=20260903v3b"></script>
+<script src="app.js?v=20260903v3b"></script>
 <script src="admin.js"></script>
 </body>
 </html>

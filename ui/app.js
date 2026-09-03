@@ -44,6 +44,7 @@
     lastPoll: 0,
     timer: null,
     chart: null,
+    reChart: null,            // rule-engine equity curve (Chart.js instance; sibling of state.chart)
     dailyChart: null,
     feedVenue: 'crypto',      // decision-feed top tab: crypto | pm
     feedKind: 'all',          // decision-feed sub-chip: all | new | updates | rejected | holds | quiet | errors
@@ -909,6 +910,157 @@
   }
   const RE_WHY_TAG = { stop: 'tag-stop', tp: 'tag-tp', time: 'tag-stale' };
 
+  // ---- rule-engine equity curve: a sibling of ensureChart()/renderChart() that reads rb.equity_hist
+  // instead of /api/equity. Same Chart.js theme (grid/tooltip/axes), same canvas fallback, but the line
+  // is green when the book is above start and red when below, with a single dashed `start` baseline.
+  function ensureREChart() {
+    if (state.reChart || typeof window.Chart === 'undefined') return state.reChart;
+    const canvas = $id('re-equity-chart');
+    if (!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    const css = getComputedStyle(document.documentElement);
+    const grid = css.getPropertyValue('--border').trim() || '#262b36';
+    const text2 = css.getPropertyValue('--text-2').trim() || '#a4abb8';
+    const text3 = css.getPropertyValue('--text-3').trim() || '#6e7684';
+    const good = css.getPropertyValue('--good').trim() || '#22b14c';
+    const surface2 = css.getPropertyValue('--surface-2').trim() || '#1b1f27';
+    const bg = css.getPropertyValue('--bg').trim() || '#0c0e12';
+    const text = css.getPropertyValue('--text').trim() || '#e8eaee';
+
+    const reRef = {
+      id: 'reRef',
+      afterDatasetsDraw(chart) {
+        const { ctx: c, chartArea: area, scales: { y } } = chart;
+        const start = chart.options.plugins.reRef && chart.options.plugins.reRef.start;
+        if (start == null || start < y.min || start > y.max) return;
+        c.save();
+        c.setLineDash([4, 4]); c.lineWidth = 1;
+        c.font = '11px ' + (css.getPropertyValue('--mono').trim() || 'monospace');
+        c.textBaseline = 'bottom';
+        const yy = y.getPixelForValue(start);
+        c.strokeStyle = text3;
+        c.beginPath(); c.moveTo(area.left, yy); c.lineTo(area.right, yy); c.stroke();
+        c.fillStyle = text3; c.textAlign = 'right';
+        c.fillText('start', area.right - 4, yy - 3);
+        c.restore();
+      },
+    };
+
+    state.reChart = new window.Chart(ctx, {
+      type: 'line',
+      data: { datasets: [{
+        label: 'Equity', data: [], parsing: false,
+        borderColor: good, borderWidth: 2, tension: 0.15,
+        pointRadius: 0, pointHitRadius: 12, pointHoverRadius: 4, pointHoverBackgroundColor: good, pointHoverBorderColor: bg, pointHoverBorderWidth: 2,
+        fill: { target: 'origin', above: 'rgba(34,177,76,0.10)' },
+      }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, normalized: true,
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        plugins: {
+          legend: { display: false },
+          reRef: {},
+          tooltip: {
+            backgroundColor: surface2, borderColor: grid, borderWidth: 1, titleColor: text2, bodyColor: text,
+            displayColors: false, padding: 10,
+            callbacks: {
+              title: (items) => items.length ? fmtTime(items[0].parsed.x / 1000) : '',
+              label: (item) => {
+                const start = state.status && state.status.rule_book && state.status.rule_book.start;
+                const v = item.parsed.y;
+                const extra = start ? `  (${fmtMult(v / start)}, ${fmtPct((v / start - 1) * 100)})` : '';
+                return fmtUSD(v) + extra;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'linear', bounds: 'data',
+            grid: { color: grid, drawTicks: false }, border: { color: grid },
+            ticks: { color: text3, maxTicksLimit: 8, maxRotation: 0, autoSkip: true, font: { size: 11 }, callback: (v) => {
+              const d = new Date(v);
+              const pts = (state.reChart && state.reChart.data.datasets[0].data) || [];
+              const span = pts.length ? (pts[pts.length - 1].x - pts[0].x) / 1000 : 0;
+              return span > 2 * 86400 ? d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' }) : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+            } },
+          },
+          y: {
+            position: 'right', grace: '5%',
+            grid: { color: grid, drawTicks: false }, border: { display: false },
+            ticks: { color: text3, maxTicksLimit: 6, font: { size: 11 }, callback: (v) => '$' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 }) },
+          },
+        },
+      },
+      plugins: [reRef],
+    });
+    return state.reChart;
+  }
+
+  // pts: [{ts, equity}] (seconds). up = current >= start (green) vs below (red).
+  function renderREChart(pts, start, up) {
+    const css = getComputedStyle(document.documentElement);
+    const good = css.getPropertyValue('--good').trim() || '#22b14c';
+    const bad = css.getPropertyValue('--bad').trim() || '#e5484d';
+    const color = up ? good : bad;
+    const fillRgba = up ? 'rgba(34,177,76,0.10)' : 'rgba(229,72,77,0.10)';
+    const chart = ensureREChart();
+    if (chart) {
+      const ds = chart.data.datasets[0];
+      ds.data = pts.map((p) => ({ x: p.ts * 1000, y: p.equity }));
+      ds.borderColor = color; ds.pointHoverBackgroundColor = color;
+      ds.fill = { target: 'origin', above: fillRgba };
+      chart.options.plugins.reRef = { start };
+      const ys = pts.map((p) => p.equity);
+      if (start != null) ys.push(start);
+      if (ys.length) {
+        const lo = Math.min.apply(null, ys), hi = Math.max.apply(null, ys);
+        const pad = Math.max((hi - lo) * 0.08, hi * 0.004);
+        chart.options.scales.y.min = lo - pad; chart.options.scales.y.max = hi + pad;
+      }
+      chart.update('none');
+    } else {
+      drawFallbackREChart(pts, start, color, fillRgba);
+    }
+  }
+
+  // Minimal canvas renderer used only if the Chart.js CDN is blocked (sibling of drawFallbackChart).
+  function drawFallbackREChart(pts, start, color, fillRgba) {
+    const canvas = $id('re-equity-chart');
+    if (!canvas) return;
+    const wrap = canvas.parentElement;
+    const dpr = window.devicePixelRatio || 1;
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const c = canvas.getContext('2d');
+    c.scale(dpr, dpr);
+    c.clearRect(0, 0, W, H);
+    if (!pts.length) return;
+    const padL = 8, padR = 64, padT = 10, padB = 24;
+    const xs = pts.map((p) => p.ts), ys = pts.map((p) => p.equity);
+    if (start != null) ys.push(start);
+    const x0 = xs[0], x1 = xs[xs.length - 1] || x0 + 1;
+    let lo = Math.min.apply(null, ys), hi = Math.max.apply(null, ys);
+    const pad = Math.max((hi - lo) * 0.08, 1); lo -= pad; hi += pad;
+    const X = (t) => padL + ((t - x0) / Math.max(1, x1 - x0)) * (W - padL - padR);
+    const Y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+    c.strokeStyle = '#262b36'; c.lineWidth = 1; c.fillStyle = '#6e7684'; c.font = '11px monospace'; c.textAlign = 'left';
+    for (let i = 0; i <= 4; i++) {
+      const v = lo + (i / 4) * (hi - lo), yy = Y(v);
+      c.beginPath(); c.moveTo(padL, yy); c.lineTo(W - padR, yy); c.stroke();
+      c.fillText('$' + Math.round(v).toLocaleString('en-US'), W - padR + 6, yy + 4);
+    }
+    if (start != null && start >= lo && start <= hi) {
+      c.save(); c.setLineDash([4, 4]); c.strokeStyle = '#6e7684'; c.beginPath(); c.moveTo(padL, Y(start)); c.lineTo(W - padR, Y(start)); c.stroke();
+      c.fillStyle = '#6e7684'; c.textAlign = 'right'; c.fillText('start', W - padR - 4, Y(start) - 3); c.restore();
+    }
+    c.beginPath();
+    pts.forEach((p, i) => { const x = X(p.ts), y = Y(p.equity); if (i === 0) c.moveTo(x, y); else c.lineTo(x, y); });
+    c.strokeStyle = color; c.lineWidth = 2; c.lineJoin = 'round'; c.lineCap = 'round'; c.stroke();
+    c.lineTo(X(x1), Y(lo)); c.lineTo(X(x0), Y(lo)); c.closePath(); c.fillStyle = fillRgba; c.fill();
+    c.fillStyle = '#6e7684'; c.textAlign = 'left'; c.fillText(fmtTime(x0), padL, H - 6); c.textAlign = 'right'; c.fillText(fmtTime(x1), W - padR, H - 6);
+  }
+
   function renderRuleEngine() {
     const panel = $id('rule-engine-panel');
     if (!panel) return;   // stale cached index.html without the panel skeleton: skip quietly
@@ -955,6 +1107,62 @@
         <div class="re-kpi-v ${k.cls || ''}">${k.v}</div>
         ${k.sub ? `<div class="re-kpi-s muted">${esc(k.sub)}</div>` : ''}
       </div>`).join('');
+
+      // ---- equity curve (rb.equity_hist: array of [ts_seconds, equity]) ----
+      // Reuses the main equity chart's Chart.js style via renderREChart(); green above start, red below.
+      const hist = Array.isArray(rb.equity_hist) ? rb.equity_hist
+        .map((pt) => (Array.isArray(pt) && pt.length >= 2 && num(pt[0]) != null && num(pt[1]) != null ? { ts: pt[0], equity: pt[1] } : null))
+        .filter(Boolean) : [];
+      const eqEmpty = $id('re-equity-empty');
+      const rangeEl = $id('re-eq-range');
+      const swatch = $id('re-swatch-line');
+      if (hist.length >= 2) {
+        if (eqEmpty) eqEmpty.hidden = true;
+        let lo = Infinity, hi = -Infinity;
+        for (const p of hist) { if (p.equity < lo) lo = p.equity; if (p.equity > hi) hi = p.equity; }
+        const cur = hist[hist.length - 1].equity;
+        const up = start == null ? cur >= (hist[0].equity) : cur >= start;
+        if (swatch) swatch.className = 'swatch re-swatch-line' + (up ? '' : ' neg');
+        if (rangeEl) rangeEl.textContent = `${hist.length} pts · lo ${fmtUSD(lo)} · hi ${fmtUSD(hi)} · now ${fmtUSD(cur)}`;
+        renderREChart(hist, start, up);
+      } else {
+        if (eqEmpty) eqEmpty.hidden = false;
+        if (rangeEl) rangeEl.textContent = hist.length === 1 ? '1 pt so far' : '';
+        if (swatch) swatch.className = 'swatch re-swatch-line';
+      }
+
+      // ---- realized vs unrealized split ----
+      const unrealized = posEntries.reduce((a, [, p]) => a + (num(p.upnl) || 0), 0);
+      const totalPnl = equity != null && start != null ? equity - start : (realizedNet + unrealized);
+      const splitCells = [
+        { l: 'Realized', v: realizedNet, s: trades.length ? `${trades.length} closed trade${trades.length === 1 ? '' : 's'}` : 'no closed trades' },
+        { l: 'Unrealized', v: unrealized, s: posEntries.length ? `${posEntries.length} open position${posEntries.length === 1 ? '' : 's'}` : 'nothing open' },
+        { l: 'Total P&L', v: totalPnl, s: start != null ? 'equity − start' : 'realized + unrealized' },
+      ];
+      $id('re-split').innerHTML = splitCells.map((c) => `<div class="re-split-cell">
+        <div class="re-split-l">${esc(c.l)}</div>
+        <div class="re-split-v ${signClass(c.v)}">${fmtUSD(c.v, true)}</div>
+        <div class="re-split-s">${esc(c.s)}</div>
+      </div>`).join('');
+
+      // ---- live per-coin cards (mark + uPnL refresh each poll) ----
+      $id('re-live-count').textContent = posEntries.length ? `(${posEntries.length})` : '';
+      $id('re-live-cards').innerHTML = posEntries.length ? posEntries.map(([coin, p]) => {
+        const mark = num(p.mark), entry = num(p.entry), upnl = num(p.upnl);
+        const dir = String(p.side || 'long').toLowerCase() === 'short' ? -1 : 1;
+        const pct = mark != null && entry ? (mark / entry - 1) * 100 * dir : null;   // P&L% from the position's side
+        const notion = num(p.notional);
+        const upnlPct = upnl != null && notion ? (upnl / notion) * 100 : null;
+        const cls = upnl == null ? '' : signClass(upnl);
+        return `<div class="re-live-card ${cls}">
+          <div class="re-live-top">
+            <span class="re-live-coin">${esc(coin)}</span>${rbSidePill(p.side)}${stratChip(p.strat)}
+          </div>
+          <div class="re-live-mark">${fmtPx(mark)}</div>
+          <div class="re-live-upnl ${cls}">${fmtUSD(upnl, true)}${upnlPct != null ? ` <span class="small">(${fmtPct(upnlPct)})</span>` : ''}</div>
+          <div class="re-live-sub">entry ${fmtPx(entry)}${pct != null ? ` · ${fmtPct(pct)}` : ''} · ${fmtUSD(notion)} notl</div>
+        </div>`;
+      }).join('') : '<div class="re-live-empty">No open positions — waiting for a setup.</div>';
 
       // ---- open positions ----
       $id('re-pos-count').textContent = posEntries.length ? `(${posEntries.length})` : '';
@@ -2156,8 +2364,10 @@
     if (t === 'light') document.documentElement.setAttribute('data-theme', 'light'); else document.documentElement.removeAttribute('data-theme');
     try { localStorage.setItem('theme', t); } catch (_) { /* ignore */ }
     if (state.chart) { state.chart.destroy(); state.chart = null; }
+    if (state.reChart) { state.reChart.destroy(); state.reChart = null; }
     if (state.dailyChart) { state.dailyChart.destroy(); state.dailyChart = null; }
     renderChart();
+    renderRuleEngine();   // rebuilds the rule-engine equity chart with the new theme's colors
     renderDailyChart(state.dailyRows);
   }
   $id('theme-btn').addEventListener('click', () => {

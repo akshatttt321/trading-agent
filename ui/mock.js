@@ -419,6 +419,9 @@
       cycleId += 1;
       equity.push({ ts: lastCycleTs, equity: e });
       if (equity.length > 3000) equity.shift();
+      // rule engine appends its own equity point each cycle (rbEquityHist / ruleBook defined below; safe at call time).
+      rbEquityHist.push([lastCycleTs, rbEquityNow()]);
+      if (rbEquityHist.length > 600) rbEquityHist.shift();
       cycles.unshift(mkCycle(cycleId, lastCycleTs, e, pick(['hold', 'quiet', 'hold', 'quiet', 'hold', 'fill', 'reject', 'stop', 'fail', 'pm', 'pmupd', 'pmreject', 'spotbuy', 'spotsell', 'close', 'llmerr'])));
       if (cycles.length > CYCLE_POOL) cycles.pop();
       addUsage('proposer', config.llm.proposer.model, 9000 + Math.round(rnd() * 2000), 700 + Math.round(rnd() * 400));
@@ -444,8 +447,9 @@
   // Deterministic: 2h momentum on movers, 1D-trend filtered, fixed 2R exits. Two strategies — `pullback`
   // (buy the dip into trend) and `deepfade` (fade an overextended move). This is the dashboard hero in v3.
   const RB_T0 = now();
+  const RB_START = 300.0;   // the rule engine runs a small $300 book (risk_usd 15 = 5%; trade pnls are R×15)
   const ruleBook = {
-    start: startEquity,
+    start: RB_START,
     start_ts: round(startTs, 1),
     // 3 open: mix of pullback/deepfade and long/short.
     positions: {
@@ -469,6 +473,31 @@
     ],
   };
   ruleBook.cash = round(ruleBook.start + ruleBook.trades.reduce((a, t) => a + (t.pnl || 0), 0), 2);
+  // Live rule-book equity = cash + open uPnL at the current (drifting) marks.
+  function rbEquityNow() {
+    let upnl = 0;
+    for (const [coin, p] of Object.entries(ruleBook.positions)) {
+      const mark = markFor(coin) != null ? markFor(coin) : p.entry;
+      const dir = p.side === 'short' ? -1 : 1;
+      upnl += (mark - p.entry) * dir * (p.notional / p.entry);
+    }
+    return round(ruleBook.cash + upnl, 2);
+  }
+  // Equity history: ~35 hourly points drifting from the $300 start up to the current live equity, so the
+  // curve is continuous into the live tail (appended each cycle in tick()). Noise-around-trend, endpoints exact.
+  const rbEquityHist = [];
+  (function buildRBHist() {
+    const n = 34, step = 3600;
+    const end = rbEquityNow();                 // land the walk on the live equity (cash + open uPnL)
+    let ts = RB_T0 - n * step;
+    for (let i = 0; i <= n; i++) {
+      const frac = i / n;
+      const trend = ruleBook.start + (end - ruleBook.start) * frac;
+      const val = i === 0 ? ruleBook.start : i === n ? end : trend + gauss() * 2.6;   // exact endpoints
+      rbEquityHist.push([round(ts, 1), round(val, 2)]);
+      ts += step;
+    }
+  })();
   // Marks follow the drifting demo prices; equity = cash + open uPnL (stamped every poll here, hourly in prod).
   function ruleBookView() {
     const positions = {};
@@ -481,9 +510,14 @@
       upnlSum += upnl;
       positions[coin] = Object.assign({}, p, { mark, upnl });
     }
+    const equity = round(ruleBook.cash + upnlSum, 2);
+    // Return a copy; the final point tracks the live (between-cycle) equity so the chart endpoint == KPI equity.
+    const hist = rbEquityHist.map((p) => [p[0], p[1]]);
+    if (hist.length) hist[hist.length - 1] = [round(now(), 1), equity];
     return {
       cash: ruleBook.cash, start: ruleBook.start, start_ts: ruleBook.start_ts,
-      equity: round(ruleBook.cash + upnlSum, 2),
+      equity,
+      equity_hist: hist,
       positions,
       pending: ruleBook.pending.map((o) => Object.assign({}, o)),
       trades: ruleBook.trades.map((t) => Object.assign({}, t)),
