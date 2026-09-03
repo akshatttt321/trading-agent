@@ -204,6 +204,10 @@ class Agent:
         resting = self.state.get("resting_orders") or []
         if resting:
             self._check_resting(resting, raw, prices)
+        try:
+            self.rulebook.refresh_marks(prices)                # keep the rule-engine equity/marks live between 2h cycles
+        except Exception:
+            log.exception("rulebook refresh_marks")
         if not may_fire:
             return ""     # storm-guard window: stops/fills above still ran; alarms stay ARMED instead of being consumed (M1)
         l = self.cfg.llm

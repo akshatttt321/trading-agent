@@ -56,6 +56,26 @@ class RuleBook:
             eq += p["notional"] * sig * (px - p["entry"]) / p["entry"]
         return eq
 
+    def refresh_marks(self, prices):
+        """Light 30s-tick refresh (display only): re-mark open positions, restamp equity + equity_hist. No signals,
+        no fills - those stay on the 2h cycle. Keeps the dashboard live between 2h signal runs."""
+        b = self.state.get("rule_book")
+        if not b:
+            return
+        now = time.time()
+        for c, p_ in (b.get("positions") or {}).items():
+            px = prices.get(c) or p_.get("mark") or p_["entry"]
+            sgn = 1 if p_["side"] == "long" else -1
+            p_["mark"] = px
+            p_["upnl"] = round(p_["notional"] * sgn * (px - p_["entry"]) / p_["entry"], 2)
+        eq = self.equity(prices)
+        b["equity"] = round(eq, 2)
+        hist = b.get("equity_hist") or []
+        if not hist or now - hist[-1][0] >= 120:               # at most one point / 2 min
+            hist.append([int(now), round(eq, 2)])
+            b["equity_hist"] = hist[-600:]
+        self.state.set("rule_book", b)
+
     def _daily_trend(self, coin: str, now: float) -> int:
         """+1/-1/0 daily trend from closed 1D candles (ema20 vs ema50, price vs sma50). Cached ~6h per coin."""
         cache = self.state.get("rb_daily_trend") or {}
