@@ -447,20 +447,21 @@
   // Deterministic: 2h momentum on movers, 1D-trend filtered, fixed 2R exits. Two strategies — `pullback`
   // (buy the dip into trend) and `deepfade` (fade an overextended move). This is the dashboard hero in v3.
   const RB_T0 = now();
-  const RB_START = 300.0;   // the rule engine runs a small $300 book (risk_usd 15 = 5%; trade pnls are R×15)
+  const RB_START = 300.0;   // the rule engine runs a small $300 book at 10x leverage (risk ~2%/trade; margin = notional/10)
   const ruleBook = {
     start: RB_START,
     start_ts: round(startTs, 1),
     // 3 open: mix of pullback/deepfade and long/short.
+    // notional = full exposure; at 10x leverage margin_usd = notional/10; risk_usd = notional × stop-distance (~2% of the $300 book).
     positions: {
-      LINK: { side: 'long',  strat: 'pullback', entry: 15.05,  stop: 14.62,  tp: 15.91,  notional: 490.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 26000, 1), deadline_ts: round(RB_T0 + 146800, 1) },
-      XRP:  { side: 'short', strat: 'deepfade', entry: 0.628,  stop: 0.6491, tp: 0.5858, notional: 440.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 9800, 1),  deadline_ts: round(RB_T0 + 163000, 1) },
-      DOGE: { side: 'long',  strat: 'pullback', entry: 0.1402, stop: 0.1360, tp: 0.1486, notional: 415.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 4200, 1),  deadline_ts: round(RB_T0 + 168400, 1) },
+      LINK: { side: 'long',  strat: 'pullback', entry: 15.05,  stop: 14.62,  tp: 15.91,  notional: 210.0, leverage: 10, margin_usd: 21.0, risk_usd: 6.0, opened_ts: round(RB_T0 - 26000, 1), deadline_ts: round(RB_T0 + 146800, 1) },
+      XRP:  { side: 'short', strat: 'deepfade', entry: 0.628,  stop: 0.6491, tp: 0.5858, notional: 180.0, leverage: 10, margin_usd: 18.0, risk_usd: 6.0, opened_ts: round(RB_T0 - 9800, 1),  deadline_ts: round(RB_T0 + 163000, 1) },
+      DOGE: { side: 'long',  strat: 'pullback', entry: 0.1402, stop: 0.1360, tp: 0.1486, notional: 200.0, leverage: 10, margin_usd: 20.0, risk_usd: 6.0, opened_ts: round(RB_T0 - 4200, 1),  deadline_ts: round(RB_T0 + 168400, 1) },
     },
     // 2 pending limits.
     pending: [
-      { coin: 'SUI',  side: 'short', strat: 'deepfade', limit: 1.982, stop: 2.049, tp: 1.848, notional: 445.0, risk_usd: 15.0, expires_ts: round(RB_T0 + 7440, 1) },
-      { coin: 'AVAX', side: 'long',  strat: 'pullback', limit: 23.9,  stop: 23.1,  tp: 25.5,  notional: 450.0, risk_usd: 15.0, expires_ts: round(RB_T0 + 12600, 1) },
+      { coin: 'SUI',  side: 'short', strat: 'deepfade', limit: 1.982, stop: 2.049, tp: 1.848, notional: 185.0, leverage: 10, margin_usd: 18.5, risk_usd: 6.2, expires_ts: round(RB_T0 + 7440, 1) },
+      { coin: 'AVAX', side: 'long',  strat: 'pullback', limit: 23.9,  stop: 23.1,  tp: 25.5,  notional: 200.0, leverage: 10, margin_usd: 20.0, risk_usd: 6.7, expires_ts: round(RB_T0 + 12600, 1) },
     ],
     // 6 closed: mix of stop/tp/time, wins and losses, across both strategies.
     trades: [

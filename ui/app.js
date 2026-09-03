@@ -1088,19 +1088,44 @@
       const trades = (Array.isArray(rb.trades) ? rb.trades.filter((t) => t && typeof t === 'object') : [])
         .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
 
-      // ---- KPI row ----
+      // ---- perp metrics helpers ----
+      // A perp position commits margin = notional / leverage; the notional is the full exposure. leverage and
+      // margin_usd are v3 fields and may be ABSENT on older payloads — fall back to 10x and notional/10.
+      const LEV_DEFAULT = 10;
+      const posLev = (p) => { const l = num(p.leverage); return l && l > 0 ? l : LEV_DEFAULT; };
+      const posMargin = (p) => { const m = num(p.margin_usd); if (m != null) return m; const n = num(p.notional); return n != null ? n / posLev(p) : null; };
+      const posDir = (p) => (String(p.side || 'long').toLowerCase() === 'short' ? -1 : 1);
+
+      // ---- P&L (realized = closed trades, unrealized = open uPnL; total is authoritative, never a stale equity−start) ----
       const realizedNet = trades.reduce((a, t) => a + (num(t.pnl) || 0), 0);
+      const unrealized = posEntries.reduce((a, [, p]) => a + (num(p.upnl) || 0), 0);
+      const totalPnl = realizedNet + unrealized;
       const wins = trades.filter((t) => num(t.pnl) != null && t.pnl > 0).length;
       const winRate = trades.length ? (wins / trades.length) * 100 : null;
-      const grossNotional = posEntries.reduce((a, [, p]) => a + (num(p.notional) || 0), 0);
-      const grossPct = equity ? (grossNotional / equity) * 100 : null;
+
+      // ---- book-level exposure across all open positions ----
+      const grossNotional = posEntries.reduce((a, [, p]) => a + (num(p.notional) || 0), 0);   // Σ full exposure
+      const grossPct = equity ? (grossNotional / equity) * 100 : null;                        // gross exposure vs equity
+      const totalMargin = posEntries.reduce((a, [, p]) => a + (posMargin(p) || 0), 0);         // Σ capital committed
+      const marginUtil = equity ? (totalMargin / equity) * 100 : null;                         // margin utilization
+      const freeMargin = equity != null ? equity - totalMargin : null;                         // equity − margin used
+      const netExposure = posEntries.reduce((a, [, p]) => a + posDir(p) * (num(p.notional) || 0), 0); // directional lean
+      // gross-exposure risk fence: amber past 250% of equity, red past the 300% cap.
+      const grossCls = grossPct == null ? '' : grossPct > 300 ? 'neg' : grossPct > 250 ? 'warn' : '';
+      const netWord = posEntries.length ? (netExposure > 0.5 ? 'net long' : netExposure < -0.5 ? 'net short' : 'balanced') : 'nothing open';
+
+      // ---- metrics grid: P&L split + perp exposure + counts + win rate ----
       const kpis = [
-        { l: 'Open', v: String(posEntries.length) },
-        { l: 'Pending', v: String(pend.length) },
-        { l: 'Closed', v: String(trades.length) },
-        { l: 'Realized net', v: fmtUSD(realizedNet, true), cls: signClass(realizedNet) },
+        { l: 'Equity', v: fmtUSD(equity), sub: mult != null ? mult.toFixed(3) + 'x vs start' : '' },
+        { l: 'Total P&L', v: fmtUSD(totalPnl, true), cls: signClass(totalPnl), sub: 'realized + unrealized' },
+        { l: 'Realized', v: fmtUSD(realizedNet, true), cls: signClass(realizedNet), sub: trades.length ? `${trades.length} closed trade${trades.length === 1 ? '' : 's'}` : 'no closed trades' },
+        { l: 'Unrealized', v: fmtUSD(unrealized, true), cls: signClass(unrealized), sub: posEntries.length ? `${posEntries.length} open position${posEntries.length === 1 ? '' : 's'}` : 'nothing open' },
+        { l: 'Gross exposure', v: fmtUSD(grossNotional), cls: grossCls, sub: grossPct != null ? `${grossPct.toFixed(0)}% of equity` : 'no positions' },
+        { l: 'Margin used', v: fmtUSD(totalMargin), sub: marginUtil != null ? `${marginUtil.toFixed(0)}% utilization` : '' },
+        { l: 'Free margin', v: fmtUSD(freeMargin), sub: equity ? `of ${fmtUSD(equity)} equity` : '' },
+        { l: 'Net exposure', v: posEntries.length ? fmtUSD(netExposure, true) : '—', sub: netWord },
+        { l: 'Positions', v: `${posEntries.length} / ${pend.length} / ${trades.length}`, sub: 'open / pending / closed' },
         { l: 'Win rate', v: winRate != null ? Math.round(winRate) + '%' : '—', sub: trades.length ? `${wins}/${trades.length} wins` : 'no closed trades yet' },
-        { l: 'Gross notional', v: fmtUSD(grossNotional), cls: grossPct != null && grossPct > 250 ? 'warn' : '', sub: grossPct != null ? `${grossPct.toFixed(0)}% of equity` : '' },
       ];
       $id('re-kpis').innerHTML = kpis.map((k) => `<div class="re-kpi">
         <div class="re-kpi-l">${esc(k.l)}</div>
@@ -1131,36 +1156,23 @@
         if (swatch) swatch.className = 'swatch re-swatch-line';
       }
 
-      // ---- realized vs unrealized split ----
-      const unrealized = posEntries.reduce((a, [, p]) => a + (num(p.upnl) || 0), 0);
-      const totalPnl = equity != null && start != null ? equity - start : (realizedNet + unrealized);
-      const splitCells = [
-        { l: 'Realized', v: realizedNet, s: trades.length ? `${trades.length} closed trade${trades.length === 1 ? '' : 's'}` : 'no closed trades' },
-        { l: 'Unrealized', v: unrealized, s: posEntries.length ? `${posEntries.length} open position${posEntries.length === 1 ? '' : 's'}` : 'nothing open' },
-        { l: 'Total P&L', v: totalPnl, s: start != null ? 'equity − start' : 'realized + unrealized' },
-      ];
-      $id('re-split').innerHTML = splitCells.map((c) => `<div class="re-split-cell">
-        <div class="re-split-l">${esc(c.l)}</div>
-        <div class="re-split-v ${signClass(c.v)}">${fmtUSD(c.v, true)}</div>
-        <div class="re-split-s">${esc(c.s)}</div>
-      </div>`).join('');
-
       // ---- live per-coin cards (mark + uPnL refresh each poll) ----
       $id('re-live-count').textContent = posEntries.length ? `(${posEntries.length})` : '';
       $id('re-live-cards').innerHTML = posEntries.length ? posEntries.map(([coin, p]) => {
         const mark = num(p.mark), entry = num(p.entry), upnl = num(p.upnl);
-        const dir = String(p.side || 'long').toLowerCase() === 'short' ? -1 : 1;
-        const pct = mark != null && entry ? (mark / entry - 1) * 100 * dir : null;   // P&L% from the position's side
-        const notion = num(p.notional);
-        const upnlPct = upnl != null && notion ? (upnl / notion) * 100 : null;
+        const dir = posDir(p);
+        const pct = mark != null && entry ? (mark / entry - 1) * 100 * dir : null;   // price move in the position's favour
+        const notion = num(p.notional), margin = posMargin(p), lev = posLev(p), risk = num(p.risk_usd);
+        const roe = upnl != null && margin ? (upnl / margin) * 100 : null;           // return on the margin committed (leveraged)
         const cls = upnl == null ? '' : signClass(upnl);
         return `<div class="re-live-card ${cls}">
           <div class="re-live-top">
             <span class="re-live-coin">${esc(coin)}</span>${rbSidePill(p.side)}${stratChip(p.strat)}
           </div>
           <div class="re-live-mark">${fmtPx(mark)}</div>
-          <div class="re-live-upnl ${cls}">${fmtUSD(upnl, true)}${upnlPct != null ? ` <span class="small">(${fmtPct(upnlPct)})</span>` : ''}</div>
-          <div class="re-live-sub">entry ${fmtPx(entry)}${pct != null ? ` · ${fmtPct(pct)}` : ''} · ${fmtUSD(notion)} notl</div>
+          <div class="re-live-upnl ${cls}">${fmtUSD(upnl, true)}${roe != null ? ` <span class="small">(${fmtPct(roe)} on margin)</span>` : ''}</div>
+          <div class="re-live-sub">entry ${fmtPx(entry)}${pct != null ? ` · ${fmtPct(pct)}` : ''}</div>
+          <div class="re-live-sub">notl ${fmtUSD(notion)} · ${lev}x · margin ${fmtUSD(margin)}${risk != null ? ` · risk ${fmtUSD(risk)}` : ''}</div>
         </div>`;
       }).join('') : '<div class="re-live-empty">No open positions — waiting for a setup.</div>';
 
@@ -1171,31 +1183,38 @@
         const opened = num(p.opened_ts), deadline = num(p.deadline_ts);
         const ageTxt = opened != null ? fmtAge(nowS - opened) : '—';
         const expTxt = deadline != null ? (deadline - nowS <= 0 ? 'due' : 'exp ' + fmtAge(deadline - nowS)) : '';
+        const margin = posMargin(p), lev = posLev(p), risk = num(p.risk_usd), upnl = num(p.upnl);
+        const roe = upnl != null && margin ? (upnl / margin) * 100 : null;
         return `<tr>
           <td data-l="Coin"><div class="coin">${esc(coin)}</div><div class="small">${rbSidePill(p.side)}</div></td>
           <td data-l="Strat">${stratChip(p.strat)}</td>
           <td class="r" data-l="Entry → Mark">${fmtPx(p.entry)} →<br>${fmtPx(p.mark)}${mv != null ? ` <span class="small ${signClass(mv)}">${fmtPct(mv, 2)}</span>` : ''}</td>
           <td class="r neg" data-l="Stop">${fmtPx(p.stop)}</td>
           <td class="r pos" data-l="TP">${fmtPx(p.tp)}</td>
-          <td class="r" data-l="Notional">${fmtUSD(p.notional)}</td>
-          <td class="r ${signClass(p.upnl)}" data-l="uPnL">${fmtUSD(p.upnl, true)}</td>
+          <td class="r" data-l="Notional">${fmtUSD(num(p.notional))}</td>
+          <td class="r muted" data-l="Lev">${lev}x</td>
+          <td class="r" data-l="Margin">${fmtUSD(margin)}${risk != null ? `<br><span class="muted small">risk ${fmtUSD(risk)}</span>` : ''}</td>
+          <td class="r ${signClass(upnl)}" data-l="uPnL">${fmtUSD(upnl, true)}${roe != null ? `<br><span class="small ${signClass(roe)}">${fmtPct(roe)}</span>` : ''}</td>
           <td class="r muted small" data-l="Age / expires">${esc(ageTxt)}${expTxt ? `<br>${esc(expTxt)}` : ''}</td>
         </tr>`;
-      }).join('') : emptyRow(8, 'No open positions');
+      }).join('') : emptyRow(10, 'No open positions');
 
       // ---- pending limits ----
       $id('re-pending-count').textContent = pend.length ? `(${pend.length})` : '';
       $id('re-pending-table').querySelector('tbody').innerHTML = pend.length ? pend.map((o) => {
         const left = num(o.expires_ts) != null ? o.expires_ts - nowS : null;
+        const margin = posMargin(o), lev = posLev(o);
         return `<tr>
           <td data-l="Coin"><span class="coin">${esc(o.coin || '—')}</span> ${rbSidePill(o.side)}</td>
           <td data-l="Strat">${stratChip(o.strat)}</td>
           <td class="r" data-l="Limit">${fmtPx(o.limit)}</td>
           <td class="r neg" data-l="Stop">${fmtPx(o.stop)}</td>
           <td class="r pos" data-l="TP">${fmtPx(o.tp)}</td>
+          <td class="r" data-l="Notional">${fmtUSD(num(o.notional))}<br><span class="muted small">${lev}x</span></td>
+          <td class="r" data-l="Margin">${fmtUSD(margin)}</td>
           <td class="r" data-l="Expires in">${left == null ? '—' : left <= 0 ? 'expired' : fmtAge(left)}</td>
         </tr>`;
-      }).join('') : emptyRow(6, 'No resting limits');
+      }).join('') : emptyRow(8, 'No resting limits');
 
       // ---- closed trades (most recent first, cap 15) ----
       $id('re-trades-count').textContent = trades.length ? `(${trades.length})` : '';

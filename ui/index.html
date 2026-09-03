@@ -7,7 +7,7 @@
   <title>Trading Agent</title>
   <script>try{var t=localStorage.getItem('theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f1115'/%3E%3Cpolyline points='4,24 11,17 16,20 22,10 28,13' fill='none' stroke='%233987e5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=20260903v3b">
+  <link rel="stylesheet" href="style.css?v=20260903v3c">
 </head>
 <body>
 
@@ -59,9 +59,8 @@
         <div class="re-eyebrow">⚙️ Rule engine <span class="re-primary-tag">PRIMARY · perps</span></div>
         <div class="re-equity" id="re-equity">—</div>
         <div class="re-hero-sub"><span id="re-mult" class="re-mult">—</span> <span class="muted">vs start (<span id="re-start">—</span>)</span></div>
-        <div class="re-tagline muted small">v3: 2h momentum on movers, 1D-trend filtered, fixed 2R exits</div>
+        <div class="re-tagline muted small">2h momentum on movers · 1D-trend filtered · fixed 2R exits</div>
       </div>
-      <div class="re-kpis" id="re-kpis"></div>
     </div>
 
     <!-- Rule-engine equity curve (status.rule_book.equity_hist). Green above start, red below; start baseline dashed.
@@ -79,8 +78,10 @@
       <div id="re-equity-empty" class="empty" hidden>building history…</div>
     </div>
 
-    <!-- Realized (closed trades) vs unrealized (open uPnL) vs total (equity − start). -->
-    <div class="re-split" id="re-split"></div>
+    <!-- Perp book metrics: P&L split (realized / unrealized / total) + exposure (gross notional, margin used,
+         free margin, net directional). Gross exposure is flagged amber past 250% of equity, red past the 300% cap. -->
+    <h3 class="sub-head">Book metrics</h3>
+    <div class="re-kpis" id="re-kpis"></div>
 
     <h3 class="sub-head">Live positions <span class="count" id="re-live-count"></span></h3>
     <div class="re-live-cards" id="re-live-cards"></div>
@@ -89,7 +90,7 @@
     <div class="table-wrap">
       <table class="tbl num-tbl cards" id="re-pos-table">
         <thead><tr>
-          <th>Coin</th><th>Strat</th><th class="r">Entry → Mark</th><th class="r">Stop</th><th class="r">TP</th><th class="r">Notional</th><th class="r">uPnL</th><th class="r">Age / expires</th>
+          <th>Coin</th><th>Strat</th><th class="r">Entry → Mark</th><th class="r">Stop</th><th class="r">TP</th><th class="r">Notional</th><th class="r">Lev</th><th class="r">Margin</th><th class="r">uPnL</th><th class="r">Age / expires</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -98,7 +99,7 @@
     <h3 class="sub-head">Pending limits <span class="count" id="re-pending-count"></span></h3>
     <div class="table-wrap">
       <table class="tbl num-tbl cards" id="re-pending-table">
-        <thead><tr><th>Coin</th><th>Strat</th><th class="r">Limit</th><th class="r">Stop</th><th class="r">TP</th><th class="r">Expires in</th></tr></thead>
+        <thead><tr><th>Coin</th><th>Strat</th><th class="r">Limit</th><th class="r">Stop</th><th class="r">TP</th><th class="r">Notional</th><th class="r">Margin</th><th class="r">Expires in</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -650,8 +651,8 @@
 <div id="help-pop" class="help-pop" hidden role="tooltip"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
-<script src="mock.js?v=20260903v3b"></script>
-<script src="app.js?v=20260903v3b"></script>
+<script src="mock.js?v=20260903v3c"></script>
+<script src="app.js?v=20260903v3c"></script>
 <script src="admin.js"></script>
 </body>
 </html>
