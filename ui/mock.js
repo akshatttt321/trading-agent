@@ -440,25 +440,32 @@
     };
   }
 
-  // ---- rule book: deterministic pullback strategy racing the LLM book (status.rule_book) ----
-  // Same start as the LLM book so the "vs LLM" comparison chip is meaningful in demo mode.
+  // ---- rule engine: v3 PRIMARY perp trader (status.rule_book) ----
+  // Deterministic: 2h momentum on movers, 1D-trend filtered, fixed 2R exits. Two strategies — `pullback`
+  // (buy the dip into trend) and `deepfade` (fade an overextended move). This is the dashboard hero in v3.
   const RB_T0 = now();
   const ruleBook = {
     start: startEquity,
     start_ts: round(startTs, 1),
+    // 3 open: mix of pullback/deepfade and long/short.
     positions: {
-      LINK: { side: 'long',  entry: 15.05,  stop: 14.62,  tp: 15.91,  notional: 490.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 26000, 1), deadline_ts: round(RB_T0 + 146800, 1) },
-      XRP:  { side: 'short', entry: 0.628,  stop: 0.6491, tp: 0.5858, notional: 440.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 9800, 1),  deadline_ts: round(RB_T0 + 163000, 1) },
+      LINK: { side: 'long',  strat: 'pullback', entry: 15.05,  stop: 14.62,  tp: 15.91,  notional: 490.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 26000, 1), deadline_ts: round(RB_T0 + 146800, 1) },
+      XRP:  { side: 'short', strat: 'deepfade', entry: 0.628,  stop: 0.6491, tp: 0.5858, notional: 440.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 9800, 1),  deadline_ts: round(RB_T0 + 163000, 1) },
+      DOGE: { side: 'long',  strat: 'pullback', entry: 0.1402, stop: 0.1360, tp: 0.1486, notional: 415.0, risk_usd: 15.0, opened_ts: round(RB_T0 - 4200, 1),  deadline_ts: round(RB_T0 + 168400, 1) },
     },
+    // 2 pending limits.
     pending: [
-      { coin: 'SUI',  side: 'short', limit: 1.982, stop: 2.049, tp: 1.848, notional: 445.0, risk_usd: 15.0, expires_ts: round(RB_T0 + 7440, 1) },
-      { coin: 'AVAX', side: 'long',  limit: 23.9,  stop: 23.1,  tp: 25.5,  notional: 450.0, risk_usd: 15.0, expires_ts: round(RB_T0 + 12600, 1) },
+      { coin: 'SUI',  side: 'short', strat: 'deepfade', limit: 1.982, stop: 2.049, tp: 1.848, notional: 445.0, risk_usd: 15.0, expires_ts: round(RB_T0 + 7440, 1) },
+      { coin: 'AVAX', side: 'long',  strat: 'pullback', limit: 23.9,  stop: 23.1,  tp: 25.5,  notional: 450.0, risk_usd: 15.0, expires_ts: round(RB_T0 + 12600, 1) },
     ],
+    // 6 closed: mix of stop/tp/time, wins and losses, across both strategies.
     trades: [
-      { coin: 'DOGE', side: 'short', entry: 0.1452, exit: 0.1478, r: -1.05, pnl: -15.7, why: 'stop', ts: round(RB_T0 - 31000, 1) },
-      { coin: 'ARB',  side: 'long',  entry: 0.702,  exit: 0.741,  r: 2.02,  pnl: 30.3,  why: 'tp',   ts: round(RB_T0 - 60000, 1) },
-      { coin: 'ETH',  side: 'long',  entry: 3391,   exit: 3405,   r: 0.31,  pnl: 4.7,   why: 'time', ts: round(RB_T0 - 92000, 1) },
-      { coin: 'SOL',  side: 'short', entry: 171.8,  exit: 175.3,  r: -1.04, pnl: -15.6, why: 'stop', ts: round(RB_T0 - 128000, 1) },
+      { coin: 'ARB',  side: 'long',  strat: 'pullback', entry: 0.702,  exit: 0.741,  r: 2.02,  pnl: 30.3,  why: 'tp',   ts: round(RB_T0 - 31000, 1) },
+      { coin: 'DOGE', side: 'short', strat: 'deepfade', entry: 0.1452, exit: 0.1478, r: -1.05, pnl: -15.7, why: 'stop', ts: round(RB_T0 - 60000, 1) },
+      { coin: 'ETH',  side: 'long',  strat: 'pullback', entry: 3391,   exit: 3405,   r: 0.31,  pnl: 4.7,   why: 'time', ts: round(RB_T0 - 92000, 1) },
+      { coin: 'HYPE', side: 'long',  strat: 'deepfade', entry: 27.10,  exit: 28.72,  r: 2.01,  pnl: 29.8,  why: 'tp',   ts: round(RB_T0 - 118000, 1) },
+      { coin: 'SOL',  side: 'short', strat: 'deepfade', entry: 171.8,  exit: 175.3,  r: -1.04, pnl: -15.6, why: 'stop', ts: round(RB_T0 - 128000, 1) },
+      { coin: 'AVAX', side: 'long',  strat: 'pullback', entry: 24.30,  exit: 24.11,  r: -0.22, pnl: -3.3,  why: 'time', ts: round(RB_T0 - 152000, 1) },
     ],
   };
   ruleBook.cash = round(ruleBook.start + ruleBook.trades.reduce((a, t) => a + (t.pnl || 0), 0), 2);

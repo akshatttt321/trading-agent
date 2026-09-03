@@ -1017,3 +1017,45 @@ body.admin-open .dash, body.admin-open .foot { display: none; }
 .race-card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
 #race-detail-rule[hidden], #race-detail-llm[hidden], #race-detail-prop[hidden] { display: none; }
 .race-detail-note { margin: 6px 0 10px; }
+
+/* =====================================================================
+   v3: Rule engine hero panel (status.rule_book — PRIMARY perp trader)
+   ===================================================================== */
+.rule-engine-panel { grid-column: 1 / -1; }
+.rule-engine-panel[hidden] { display: none; }
+.re-hero { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 16px; align-items: center; margin-bottom: 6px; }
+@media (max-width: 900px) { .re-hero { grid-template-columns: 1fr; gap: 12px; } }
+.re-hero-main { min-width: 0; }
+.re-eyebrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
+.re-primary-tag { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text, #8ab8f2); border: 1px solid rgba(57,135,229,0.4); text-transform: none; }
+:root:not([data-theme="light"]) .re-primary-tag { color: #8ab8f2; }
+.re-equity { font-family: var(--mono); font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1.1; margin: 4px 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 640px) { .re-equity { font-size: 32px; } }
+.re-hero-sub { font-size: 13px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.re-mult { font-weight: 700; }
+.re-mult.pos { color: var(--good); } .re-mult.neg { color: var(--bad); } .re-mult.muted { color: var(--text-3); }
+.re-tagline { margin-top: 6px; }
+.re-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.re-kpi { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; min-width: 0; }
+.re-kpi-l { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+.re-kpi-v { font-family: var(--mono); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.re-kpi-v.pos { color: var(--good); } .re-kpi-v.neg { color: var(--bad); } .re-kpi-v.warn { color: var(--warn); }
+.re-kpi-s { font-size: 11px; font-family: var(--mono); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.re-breakdowns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.re-breakdowns > div { min-width: 0; }
+@media (max-width: 700px) { .re-breakdowns { grid-template-columns: 1fr; } }
+#re-trades-sum { margin-top: 8px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+#re-trades-sum:empty { display: none; }
+
+/* strategy chip (pullback / deepfade) */
+.strat-chip { display: inline-block; font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 4px; background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border); white-space: nowrap; }
+.strat-chip.pullback { background: var(--accent-soft); color: var(--accent-text, #8ab8f2); border-color: rgba(57,135,229,0.35); }
+.strat-chip.deepfade { background: var(--warn-soft); color: var(--warn); border-color: rgba(250,178,25,0.35); }
+:root:not([data-theme="light"]) .strat-chip.pullback { color: #8ab8f2; }
+
+/* v3 note lines (LLM book framing) + legacy perp tag */
+.v3-note { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.v3-note.compact { margin: -2px 0 10px; }
+.v3-tag { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border); white-space: nowrap; }
+.legacy-tag { display: inline-block; font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); border: 1px dashed rgba(250,178,25,0.45); vertical-align: middle; }
+.legacy-tag[hidden] { display: none; }

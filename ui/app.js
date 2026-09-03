@@ -751,6 +751,8 @@
     if (!total) { $id('perps-block').hidden = $id('spot-block').hidden = $id('pm-block').hidden = true; }
 
     $id('perps-count').textContent = perps.length ? `(${perps.length})` : '';
+    // v3: the LLM no longer trades perps — any perp here is a legacy/held position, flag it as such.
+    { const lg = $id('perps-legacy'); if (lg) lg.hidden = !perps.length; }
     $id('perps-table').querySelector('tbody').innerHTML = perps.length ? perps.map((p) => {
       const side = p.side ? String(p.side).toLowerCase() : (p.size < 0 ? 'short' : 'long');
       const margin = p.entry_px && p.size ? Math.abs(p.size) * p.entry_px / (p.leverage || 1) : null;
@@ -889,302 +891,156 @@
   }
 
 
-  // -------------------------------------------------------------- render: architecture race strip (inside the rule-book panel)
-  // Three books racing from the same start: the full LLM pipeline (proposer+verifier+manager), the
-  // deterministic rule book, and the proposer-only counterfactual (status.proposer_book — what the LLM
-  // book would hold if the verifier never vetoed; gates still applied, shadow fills optimistic).
-  // Fixed card order — never sorted; the strictly-best multiple gets a "leading" badge, ties get none.
-  // `proposer_book` is a NEW key absent on old payloads: its card is simply omitted, the other two stay.
-  // Own try/catch so a malformed payload hides the strip without touching the rest of the panel.
-  function renderArchRace() {
-    const strip = $id('arch-race');
-    if (!strip) return;   // stale cached index.html without the strip container: skip quietly
-    try {
-      const s = state.status || {};
-      const num = (v) => (typeof v === 'number' && !isNaN(v) ? v : null);
-      const cards = [];
 
-      // 1) LLM book: the main account (full proposer + verifier + manager pipeline)
-      const llmEq = num(s.equity) != null ? num(s.equity) : num(s.snapshot && s.snapshot.equity_usd);
-      cards.push({ id: 'llm', name: '\u{1F9E0} LLM book', equity: llmEq, start: num(s.starting_equity) });
-
-      // 2) rule book (equity falls back to cash, same as the panel header)
-      const rb = s.rule_book && typeof s.rule_book === 'object' ? s.rule_book : null;
-      if (rb) {
-        cards.push({
-          id: 'rule', name: '\u2699\uFE0F Rule book',
-          equity: num(rb.equity) != null ? num(rb.equity) : num(rb.cash), start: num(rb.start),
-        });
-      }
-
-      // 3) proposer-only counterfactual (status.proposer_book, may be absent on old payloads)
-      const pb = s.proposer_book && typeof s.proposer_book === 'object' ? s.proposer_book : null;
-      if (pb) {
-        const vetoes = n0(pb.vetoes_resolved) + n0(pb.vetoes_open);
-        cards.push({
-          id: 'prop', name: '\u{1F916} Proposer-only',
-          equity: num(pb.equity), start: num(pb.start),
-          sub: `counterfactual \u00B7 ${vetoes} vetoes absorbed`,
-          note: typeof pb.note === 'string' ? pb.note : '',
-        });
-      }
-
-      for (const c of cards) c.mult = c.equity != null && c.start ? c.equity / c.start : null;
-      const mults = cards.map((c) => c.mult).filter((m) => m != null);
-      const best = mults.length ? Math.max.apply(null, mults) : null;
-      const leaders = best != null ? cards.filter((c) => c.mult === best) : [];
-      const leaderId = leaders.length === 1 ? leaders[0].id : null;   // tie or no data -> no badge
-
-      // The cards double as tabs: the selected book's detail view renders below the strip.
-      // Selection lives in state.raceTab only; if the selected book's card is absent (old payload
-      // without proposer_book, say) fall back to 'rule', then to the first card that exists.
-      if (!cards.some((c) => c.id === state.raceTab)) {
-        state.raceTab = cards.some((c) => c.id === 'rule') ? 'rule' : (cards[0] ? cards[0].id : 'rule');
-      }
-      strip.innerHTML = cards.map((c) => {
-        const on = c.id === state.raceTab;
-        const tip = (c.note ? c.note + ' \u2014 ' : '') + 'click to inspect this book';
-        return `
-        <div class="race-card${on ? ' active' : ''}" data-book="${c.id}" role="button" tabindex="0" aria-pressed="${on ? 'true' : 'false'}" title="${esc(tip)}">
-          <div class="race-name">${c.name}${c.id === leaderId ? ' <span class="race-badge">leading</span>' : ''}</div>
-          <div class="race-eq">${fmtUSD(c.equity)}</div>
-          <div class="race-mult ${c.mult != null ? (c.mult >= 1 ? 'pos' : 'neg') : 'muted'}">${c.mult != null ? c.mult.toFixed(3) + 'x' : '\u2014'}</div>
-          ${c.sub ? `<div class="race-sub muted small">${esc(c.sub)}</div>` : ''}
-        </div>`;
-      }).join('');
-      strip.hidden = cards.length === 0;
-      renderRaceDetail();
-    } catch (e) {
-      try { console.error('architecture race strip failed to render; hiding it', e); } catch (_) { /* noop */ }
-      strip.hidden = true;
-      ['race-detail-llm', 'race-detail-prop'].forEach((id) => { const el = $id(id); if (el) el.hidden = true; });
-      const rd = $id('race-detail-rule');
-      if (rd) rd.hidden = false;   // fall back to the always-rendered rule tables
-    }
+  // -------------------------------------------------------------- render: rule engine (status.rule_book) — v3 PRIMARY perp trader
+  // v3: the deterministic rule engine trades ALL perps (2h momentum on movers, 1D-trend filtered, fixed 2R exits).
+  // Its book (status.rule_book) is the dashboard HERO. Fields may be null/absent (equity/mark/upnl are stamped
+  // periodically, trades[] can be empty at start) — every access is null-guarded and the whole body is wrapped
+  // in try/catch so a malformed payload only hides this panel, never crashes renderAll.
+  const RE_STRATS = ['pullback', 'deepfade'];
+  function stratChip(strat) {
+    const s = String(strat == null ? '' : strat).toLowerCase();
+    const cls = RE_STRATS.includes(s) ? s : '';
+    return `<span class="strat-chip ${cls}">${esc(strat == null || strat === '' ? '—' : strat)}</span>`;
   }
-
-  // -------------------------------------------------------------- render: race detail views (inside the rule-book panel)
-  // One full view per book under the race strip. The rule detail is the pre-existing tables
-  // (#race-detail-rule, rendered by renderRuleBook below); llm/prop are rendered here on demand.
-  // Clicking a card never changes data — only which detail is visible.
-  function renderRaceDetail() {
-    const sel = state.raceTab;
-    const rule = $id('race-detail-rule'), llm = $id('race-detail-llm'), prop = $id('race-detail-prop');
-    if (rule) rule.hidden = sel !== 'rule';
-    if (llm) llm.hidden = sel !== 'llm';
-    if (prop) prop.hidden = sel !== 'prop';
-    if (sel === 'llm') renderRaceLLM();
-    else if (sel === 'prop') renderRaceProp();
+  function rbSidePill(side) {
+    const sd = String(side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+    return `<span class="side-pill ${sd}">${sd.toUpperCase()}</span>`;
   }
+  const RE_WHY_TAG = { stop: 'tag-stop', tp: 'tag-tp', time: 'tag-stale' };
 
-  // Open-perps table from status.snapshot.perps — shared by the LLM-book and proposer-only detail
-  // views so both render executed positions identically. Null-guards every field; side comes from the
-  // explicit field when present, else the sign of size (positive = long).
-  function perpPositionsTable(perps, emptyText) {
-    const rows = (Array.isArray(perps) ? perps : []).filter((p) => p && typeof p === 'object');
-    const stopTp = (stop, tp) => `<span class="small">${stop != null ? `<span class="neg">stop ${fmtPx(stop)}</span>` : '<span class="muted">no stop</span>'} <span class="arrow">\u2192</span> ${tp != null ? `<span class="pos">tp ${fmtPx(tp)}</span>` : '<span class="muted">no tp</span>'}</span>`;
-    return `<div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
-        <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">uPnL</th><th>Stop \u2192 TP</th>
-      </tr></thead><tbody>` + (rows.length ? rows.map((p) => {
-      const side = p.side != null ? (String(p.side).toLowerCase() === 'short' ? 'short' : 'long')
-        : (typeof p.size === 'number' && p.size < 0 ? 'short' : 'long');
-      return `<tr>
-        <td data-l="Coin"><div class="coin">${esc(p.coin || '\u2014')}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span>${typeof p.leverage === 'number' && !isNaN(p.leverage) ? ` <span class="muted">${p.leverage}x</span>` : ''}</div></td>
-        <td class="r" data-l="Entry">${fmtPx(p.entry_px)}</td>
-        <td class="r" data-l="Mark">${fmtPx(p.mark_px)}</td>
-        <td class="r ${signClass(p.unrealized_pnl)}" data-l="uPnL">${fmtUSD(p.unrealized_pnl, true)}</td>
-        <td data-l="Stop \u2192 TP">${stopTp(p.stop_px, p.tp_px)}</td>
-      </tr>`;
-    }).join('') : emptyRow(5, emptyText || 'no open perp positions')) + `</tbody></table></div>`;
-  }
-
-  // LLM-book detail: open perps + PM positions from status.snapshot, plus a resting-orders one-liner.
-  // Every field is null-guarded; own try/catch hides only this section on a malformed payload.
-  function renderRaceLLM() {
-    const el = $id('race-detail-llm');
-    if (!el) return;   // stale cached index.html without the container: skip quietly
-    try {
-      const s = state.status || {};
-      const snap = s.snapshot && typeof s.snapshot === 'object' ? s.snapshot : {};
-      const perps = (Array.isArray(snap.perps) ? snap.perps : []).filter((p) => p && typeof p === 'object');
-      const pmPos = (Array.isArray(snap.pm) ? snap.pm : []).filter((m) => m && typeof m === 'object');
-      const resting = Array.isArray(s.resting_orders) ? s.resting_orders.length : 0;
-      let html = `<h3 class="sub-head">Open perp positions <span class="count">${perps.length ? `(${perps.length})` : ''}</span></h3>`
-        + perpPositionsTable(perps, 'no open perp positions');
-      if (pmPos.length) {
-        const ct = (v) => (typeof v === 'number' && !isNaN(v) ? (v * 100).toFixed(1) + '\u00A2' : '\u2014');
-        html += `<h3 class="sub-head">Prediction markets <span class="count">(${pmPos.length})</span></h3>
-          <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
-            <th>Market</th><th class="r">Cur</th><th>Stop \u2192 Target</th>
-          </tr></thead><tbody>` + pmPos.map((m) => {
-          const outNo = String(m.outcome || '').toLowerCase() === 'no';
-          const levels = m.stop_px == null && m.tp_px == null
-            ? '<span class="small muted">hold to resolution</span>'
-            : `<span class="small">${m.stop_px != null ? `<span class="neg">stop ${ct(m.stop_px)}</span>` : '<span class="muted">no stop</span>'} <span class="arrow">\u2192</span> ${m.tp_px != null ? `<span class="pos">target ${ct(m.tp_px)}</span>` : '<span class="muted">no target</span>'}</span>`;
-          return `<tr>
-            <td class="wrap" data-l="Market"><span class="side-pill ${outNo ? 'short' : 'long'}">${esc(m.outcome || '?')}</span> ${esc(m.question || '\u2014')}</td>
-            <td class="r" data-l="Cur">${ct(m.cur_price)}</td>
-            <td data-l="Stop \u2192 Target">${levels}</td>
-          </tr>`;
-        }).join('') + `</tbody></table></div>`;
-      }
-      html += `<div class="muted small race-detail-note">${resting ? `\u23F3 ${resting} resting limit order${resting === 1 ? '' : 's'} on the book` : 'no resting orders'}</div>`;
-      el.innerHTML = html;
-    } catch (e) {
-      try { console.error('LLM-book race detail failed to render; hiding it', e); } catch (_) { /* noop */ }
-      el.hidden = true;
-    }
-  }
-
-  // Proposer-only detail: the verifier vetoes this counterfactual book absorbed (status.shadow_trades
-  // entries with by=verifier since status.start_ts). live_r / r read from the vetoed trade's PoV:
-  // positive = the trade would be winning, i.e. the veto is costing the counterfactual book money.
-  function renderRaceProp() {
-    const el = $id('race-detail-prop');
-    if (!el) return;   // stale cached index.html without the container: skip quietly
-    try {
-      const s = state.status || {};
-      const st = s.shadow_trades && typeof s.shadow_trades === 'object' ? s.shadow_trades : {};
-      const since = typeof s.start_ts === 'number' && !isNaN(s.start_ts) ? s.start_ts : 0;
-      const isVeto = (t) => t && typeof t === 'object' && String(t.by || '').toLowerCase().indexOf('verifier') !== -1 && n0(t.ts) >= since;
-      const open = (Array.isArray(st.open) ? st.open : []).filter(isVeto).sort((a, b) => n0(b.ts) - n0(a.ts));
-      const resolved = (Array.isArray(st.resolved) ? st.resolved : []).filter(isVeto).sort((a, b) => n0(b.ts) - n0(a.ts));
-      const coinCell = (t) => {
-        const side = String(t.side || '').toLowerCase() === 'short' ? 'short' : 'long';
-        return `<span class="coin">${esc(t.coin || '\u2014')}</span> <span class="side-pill ${side}">${side.toUpperCase()}</span>${typeof t.size_usd === 'number' && !isNaN(t.size_usd) ? ` <span class="muted small">${fmtUSD(t.size_usd)}</span>` : ''}`;
-      };
-      let html = `<div class="muted small race-detail-note">= LLM book + every verifier-vetoed trade taken (counterfactual)</div>`;
-      // Accepted trades: the executed positions this counterfactual book shares with the LLM book
-      // (status.snapshot.perps, same table as the LLM detail). Own try/catch so a malformed snapshot
-      // degrades to a one-line note without touching the vetoed sections below.
-      try {
-        const perps = (s.snapshot && typeof s.snapshot === 'object' && Array.isArray(s.snapshot.perps) ? s.snapshot.perps : []).filter((p) => p && typeof p === 'object');
-        html += `<h3 class="sub-head">Accepted trades (live in the LLM book) <span class="count">${perps.length ? `(${perps.length})` : ''}</span></h3>`
-          + perpPositionsTable(perps, 'no open executed positions');
-      } catch (e2) {
-        try { console.error('accepted-trades section of the proposer-only detail failed; skipping it', e2); } catch (_) { /* noop */ }
-        html += `<div class="muted small race-detail-note">accepted trades unavailable</div>`;
-      }
-      if (!open.length && !resolved.length) {
-        html += `<div class="empty-state compact"><div class="empty-sub">no vetoes absorbed yet - proposer and verifier currently agree</div></div>`;
-      } else {
-        html += `<h3 class="sub-head">Vetoed trades (absorbed as shadows) <span class="count">${open.length ? `(${open.length} open)` : ''}</span></h3>
-          <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
-            <th>Coin</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Live R</th>
-          </tr></thead><tbody>` + (open.length ? open.map((t) => `<tr title="${esc(t.reason || '')}">
-            <td data-l="Coin">${coinCell(t)}</td>
-            <td class="r" data-l="Entry">${fmtPx(t.entry_px)}</td>
-            <td class="r" data-l="Mark">${fmtPx(t.mark_px)}</td>
-            <td class="r ${signClass(t.live_r)}" data-l="Live R">${fmtR(t.live_r)}</td>
-          </tr>`).join('') : emptyRow(4, 'no open absorbed vetoes')) + `</tbody></table></div>`;
-        const STATUS_TAG = { stopped: 'tag-stop', stop: 'tag-stop', target: 'tag-tp', tp: 'tag-tp' };
-        html += `<h3 class="sub-head">Resolved <span class="count">${resolved.length ? `(${resolved.length})` : ''}</span></h3>
-          <div class="table-wrap"><table class="tbl num-tbl cards"><thead><tr>
-            <th>Coin</th><th>Status</th><th class="r">R</th>
-          </tr></thead><tbody>` + (resolved.length ? resolved.map((t) => {
-          const stt = String(t.status || '').toLowerCase();
-          return `<tr title="${esc(t.reason || '')}">
-            <td data-l="Coin">${coinCell(t)}</td>
-            <td data-l="Status"><span class="tag ${STATUS_TAG[stt] || 'tag-pending'}">${esc((stt || '\u2014').toUpperCase())}</span></td>
-            <td class="r ${signClass(t.r)}" data-l="R">${fmtR(t.r)}</td>
-          </tr>`;
-        }).join('') : emptyRow(3, 'no resolved vetoes yet')) + `</tbody></table></div>`;
-      }
-      el.innerHTML = html;
-    } catch (e) {
-      try { console.error('proposer-only race detail failed to render; hiding it', e); } catch (_) { /* noop */ }
-      el.hidden = true;
-    }
-  }
-
-  // -------------------------------------------------------------- render: rule book (status.rule_book)
-  // Deterministic rule-based book racing the LLM book from the same $300 start (A/B benchmark).
-  // `rule_book` may be null/absent on older payloads, and equity / mark / upnl are only stamped
-  // hourly so they may be missing too — every field access is null-guarded and the whole body is
-  // wrapped in try/catch so a malformed payload can never crash renderAll.
-  function renderRuleBook() {
-    const panel = $id('rulebook-panel');
+  function renderRuleEngine() {
+    const panel = $id('rule-engine-panel');
     if (!panel) return;   // stale cached index.html without the panel skeleton: skip quietly
     try {
       const rb = state.status && state.status.rule_book;
       if (!rb || typeof rb !== 'object') { panel.hidden = true; return; }
       panel.hidden = false;
-      renderArchRace();   // race strip: own try/catch, cannot break the tables below
+      const nowS = Date.now() / 1000;
+      const num = (v) => (typeof v === 'number' && !isNaN(v) ? v : null);
 
-      // header: equity (fallback: cash), multiple vs start, comparison chip vs the LLM book
-      const start = typeof rb.start === 'number' && !isNaN(rb.start) ? rb.start : null;
-      const equity = typeof rb.equity === 'number' && !isNaN(rb.equity) ? rb.equity
-        : (typeof rb.cash === 'number' && !isNaN(rb.cash) ? rb.cash : null);
-      $id('rb-equity').textContent = fmtUSD(equity);
+      // ---- hero header: equity (fallback cash), multiple vs start ----
+      const start = num(rb.start);
+      const equity = num(rb.equity) != null ? num(rb.equity) : num(rb.cash);
+      $id('re-equity').textContent = fmtUSD(equity);
       const mult = equity != null && start ? equity / start : null;
-      const mEl = $id('rb-mult');
+      const mEl = $id('re-mult');
       mEl.textContent = mult != null ? mult.toFixed(3) + 'x' : '—';
-      mEl.className = 'rb-mult ' + (mult != null ? (mult >= 1 ? 'pos' : 'neg') : '');
-      const s = state.status || {};
-      const llmEq = s.equity != null ? s.equity : (s.snapshot && s.snapshot.equity_usd);
-      const chip = $id('rb-vs');
-      if (llmEq != null && !isNaN(llmEq) && equity != null) {
-        chip.hidden = false;
-        chip.textContent = `vs LLM ${fmtUSD(llmEq)} · ${equity > llmEq ? 'rules lead' : equity < llmEq ? 'LLM leads' : 'tied'}`;
-        chip.className = 'rb-chip ' + (equity > llmEq ? 'lead' : equity < llmEq ? 'trail' : '');
-      } else { chip.hidden = true; }
+      mEl.className = 're-mult ' + (mult != null ? (mult >= 1 ? 'pos' : 'neg') : 'muted');
+      $id('re-start').textContent = fmtUSD(start);
 
-      // open positions ({coin: {...}} map)
+      // ---- collections ----
       const posEntries = rb.positions && typeof rb.positions === 'object' && !Array.isArray(rb.positions)
-        ? Object.entries(rb.positions) : [];
-      $id('rb-pos-count').textContent = posEntries.length ? `(${posEntries.length})` : '';
-      $id('rb-pos-table').querySelector('tbody').innerHTML = posEntries.length ? posEntries.map(([coin, p]) => {
-        p = p && typeof p === 'object' ? p : {};
-        const side = String(p.side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+        ? Object.entries(rb.positions).filter(([, p]) => p && typeof p === 'object') : [];
+      const pend = (Array.isArray(rb.pending) ? rb.pending : []).filter((o) => o && typeof o === 'object');
+      const trades = (Array.isArray(rb.trades) ? rb.trades.filter((t) => t && typeof t === 'object') : [])
+        .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+
+      // ---- KPI row ----
+      const realizedNet = trades.reduce((a, t) => a + (num(t.pnl) || 0), 0);
+      const wins = trades.filter((t) => num(t.pnl) != null && t.pnl > 0).length;
+      const winRate = trades.length ? (wins / trades.length) * 100 : null;
+      const grossNotional = posEntries.reduce((a, [, p]) => a + (num(p.notional) || 0), 0);
+      const grossPct = equity ? (grossNotional / equity) * 100 : null;
+      const kpis = [
+        { l: 'Open', v: String(posEntries.length) },
+        { l: 'Pending', v: String(pend.length) },
+        { l: 'Closed', v: String(trades.length) },
+        { l: 'Realized net', v: fmtUSD(realizedNet, true), cls: signClass(realizedNet) },
+        { l: 'Win rate', v: winRate != null ? Math.round(winRate) + '%' : '—', sub: trades.length ? `${wins}/${trades.length} wins` : 'no closed trades yet' },
+        { l: 'Gross notional', v: fmtUSD(grossNotional), cls: grossPct != null && grossPct > 250 ? 'warn' : '', sub: grossPct != null ? `${grossPct.toFixed(0)}% of equity` : '' },
+      ];
+      $id('re-kpis').innerHTML = kpis.map((k) => `<div class="re-kpi">
+        <div class="re-kpi-l">${esc(k.l)}</div>
+        <div class="re-kpi-v ${k.cls || ''}">${k.v}</div>
+        ${k.sub ? `<div class="re-kpi-s muted">${esc(k.sub)}</div>` : ''}
+      </div>`).join('');
+
+      // ---- open positions ----
+      $id('re-pos-count').textContent = posEntries.length ? `(${posEntries.length})` : '';
+      $id('re-pos-table').querySelector('tbody').innerHTML = posEntries.length ? posEntries.map(([coin, p]) => {
+        const mv = num(p.mark) != null && num(p.entry) ? (p.mark / p.entry - 1) * 100 : null;
+        const opened = num(p.opened_ts), deadline = num(p.deadline_ts);
+        const ageTxt = opened != null ? fmtAge(nowS - opened) : '—';
+        const expTxt = deadline != null ? (deadline - nowS <= 0 ? 'due' : 'exp ' + fmtAge(deadline - nowS)) : '';
         return `<tr>
-          <td data-l="Coin"><div class="coin">${esc(coin)}</div><div class="small"><span class="side-pill ${side}">${side.toUpperCase()}</span></div></td>
-          <td class="r" data-l="Entry">${fmtPx(p.entry)}</td>
-          <td class="r" data-l="Mark">${fmtPx(p.mark)}</td>
-          <td class="r" data-l="Stop">${fmtPx(p.stop)}</td>
-          <td class="r" data-l="TP">${fmtPx(p.tp)}</td>
+          <td data-l="Coin"><div class="coin">${esc(coin)}</div><div class="small">${rbSidePill(p.side)}</div></td>
+          <td data-l="Strat">${stratChip(p.strat)}</td>
+          <td class="r" data-l="Entry → Mark">${fmtPx(p.entry)} →<br>${fmtPx(p.mark)}${mv != null ? ` <span class="small ${signClass(mv)}">${fmtPct(mv, 2)}</span>` : ''}</td>
+          <td class="r neg" data-l="Stop">${fmtPx(p.stop)}</td>
+          <td class="r pos" data-l="TP">${fmtPx(p.tp)}</td>
           <td class="r" data-l="Notional">${fmtUSD(p.notional)}</td>
           <td class="r ${signClass(p.upnl)}" data-l="uPnL">${fmtUSD(p.upnl, true)}</td>
+          <td class="r muted small" data-l="Age / expires">${esc(ageTxt)}${expTxt ? `<br>${esc(expTxt)}` : ''}</td>
         </tr>`;
-      }).join('') : emptyRow(7, 'no open positions');
+      }).join('') : emptyRow(8, 'No open positions');
 
-      // pending limit orders (expires-in computed from expires_ts)
-      const pend = Array.isArray(rb.pending) ? rb.pending : [];
-      const nowS = Date.now() / 1000;
-      $id('rb-pending-count').textContent = pend.length ? `(${pend.length})` : '';
-      $id('rb-pending-table').querySelector('tbody').innerHTML = pend.length ? pend.map((o) => {
-        o = o && typeof o === 'object' ? o : {};
-        const side = String(o.side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
-        const left = typeof o.expires_ts === 'number' ? o.expires_ts - nowS : null;
+      // ---- pending limits ----
+      $id('re-pending-count').textContent = pend.length ? `(${pend.length})` : '';
+      $id('re-pending-table').querySelector('tbody').innerHTML = pend.length ? pend.map((o) => {
+        const left = num(o.expires_ts) != null ? o.expires_ts - nowS : null;
         return `<tr>
-          <td data-l="Coin"><span class="coin">${esc(o.coin || '—')}</span> <span class="side-pill ${side}">${side.toUpperCase()}</span></td>
+          <td data-l="Coin"><span class="coin">${esc(o.coin || '—')}</span> ${rbSidePill(o.side)}</td>
+          <td data-l="Strat">${stratChip(o.strat)}</td>
           <td class="r" data-l="Limit">${fmtPx(o.limit)}</td>
-          <td class="r" data-l="Expires in">${left == null || isNaN(left) ? '—' : left <= 0 ? 'expired' : fmtAge(left)}</td>
+          <td class="r neg" data-l="Stop">${fmtPx(o.stop)}</td>
+          <td class="r pos" data-l="TP">${fmtPx(o.tp)}</td>
+          <td class="r" data-l="Expires in">${left == null ? '—' : left <= 0 ? 'expired' : fmtAge(left)}</td>
         </tr>`;
-      }).join('') : emptyRow(3, 'no resting limits');
+      }).join('') : emptyRow(6, 'No resting limits');
 
-      // closed trades: most recent first, max 10, plus a cumulative line
-      const trades = (Array.isArray(rb.trades) ? rb.trades.filter((t) => t && typeof t === 'object') : [])
-        .sort((a, b) => (b.ts || 0) - (a.ts || 0));
-      $id('rb-trades-count').textContent = trades.length ? `(${trades.length})` : '';
-      const WHY_TAG = { stop: 'tag-stop', tp: 'tag-tp', time: 'tag-stale' };
-      $id('rb-trades-table').querySelector('tbody').innerHTML = trades.length ? trades.slice(0, 10).map((t) => {
-        const side = String(t.side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+      // ---- closed trades (most recent first, cap 15) ----
+      $id('re-trades-count').textContent = trades.length ? `(${trades.length})` : '';
+      $id('re-trades-table').querySelector('tbody').innerHTML = trades.length ? trades.slice(0, 15).map((t) => {
         const why = String(t.why || '—').toLowerCase();
         return `<tr>
-          <td data-l="Coin"><span class="coin">${esc(t.coin || '—')}</span> <span class="side-pill ${side}">${side.toUpperCase()}</span></td>
-          <td data-l="Why"><span class="tag ${WHY_TAG[why] || 'tag-pending'}">${esc(why.toUpperCase())}</span></td>
-          <td class="r ${signClass(t.r)}" data-l="R">${typeof t.r === 'number' && !isNaN(t.r) ? (t.r > 0 ? '+' : '') + t.r.toFixed(2) + 'R' : '—'}</td>
+          <td data-l="Coin"><span class="coin">${esc(t.coin || '—')}</span> ${rbSidePill(t.side)}</td>
+          <td data-l="Strat">${stratChip(t.strat)}</td>
+          <td class="r" data-l="Entry → Exit">${fmtPx(t.entry)} → ${fmtPx(t.exit)}</td>
+          <td data-l="Why"><span class="tag ${RE_WHY_TAG[why] || 'tag-pending'}">${esc(why.toUpperCase())}</span></td>
+          <td class="r ${signClass(t.r)}" data-l="R">${fmtR(t.r)}</td>
           <td class="r ${signClass(t.pnl)}" data-l="PnL">${fmtUSD(t.pnl, true)}</td>
-          <td class="r muted" data-l="When">${fmtTime(t.ts)}</td>
+          <td class="r muted small" data-l="When">${fmtTime(t.ts)}</td>
         </tr>`;
-      }).join('') : emptyRow(5, 'no closed trades yet');
-      const netR = trades.reduce((a, t) => a + (typeof t.r === 'number' && !isNaN(t.r) ? t.r : 0), 0);
-      const netUsd = trades.reduce((a, t) => a + (typeof t.pnl === 'number' && !isNaN(t.pnl) ? t.pnl : 0), 0);
-      $id('rb-trades-sum').innerHTML = trades.length
-        ? `${trades.length} trades, net <span class="${signClass(netR)}">${(netR > 0 ? '+' : '') + netR.toFixed(1)}R</span>, <span class="${signClass(netUsd)}">${fmtUSD(netUsd, true)}</span>`
+      }).join('') : emptyRow(7, 'No closed trades yet');
+
+      const netR = trades.reduce((a, t) => a + (num(t.r) || 0), 0);
+      $id('re-trades-sum').innerHTML = trades.length
+        ? `${trades.length} closed · net <span class="${signClass(netR)}">${(netR > 0 ? '+' : '') + netR.toFixed(1)}R</span> · <span class="${signClass(realizedNet)}">${fmtUSD(realizedNet, true)}</span>`
         : '';
+
+      // ---- per-strategy breakdown ----
+      const byStrat = {};
+      for (const t of trades) {
+        const k = String(t.strat == null || t.strat === '' ? '—' : t.strat).toLowerCase();
+        const g = byStrat[k] || (byStrat[k] = { n: 0, r: 0, pnl: 0, label: t.strat == null || t.strat === '' ? '—' : t.strat });
+        g.n += 1; g.r += num(t.r) || 0; g.pnl += num(t.pnl) || 0;
+      }
+      const stratRows = Object.values(byStrat).sort((a, b) => b.pnl - a.pnl);
+      $id('re-strat-table').querySelector('tbody').innerHTML = stratRows.length ? stratRows.map((g) => `<tr>
+        <td data-l="Strat">${stratChip(g.label)}</td>
+        <td class="r" data-l="Trades">${g.n}</td>
+        <td class="r ${signClass(g.r)}" data-l="Net R">${(g.r > 0 ? '+' : '') + g.r.toFixed(1)}R</td>
+        <td class="r ${signClass(g.pnl)}" data-l="Net $">${fmtUSD(g.pnl, true)}</td>
+      </tr>`).join('') : emptyRow(4, 'no closed trades yet');
+
+      // ---- per-coin net $ (top 3 / bottom 3) ----
+      const byCoin = {};
+      for (const t of trades) {
+        const k = t.coin || '—';
+        const g = byCoin[k] || (byCoin[k] = { coin: k, n: 0, pnl: 0 });
+        g.n += 1; g.pnl += num(t.pnl) || 0;
+      }
+      const coinAll = Object.values(byCoin).sort((a, b) => b.pnl - a.pnl);
+      let coinRows = coinAll;
+      if (coinAll.length > 6) coinRows = coinAll.slice(0, 3).concat(coinAll.slice(-3));
+      $id('re-coin-table').querySelector('tbody').innerHTML = coinRows.length ? coinRows.map((g) => `<tr>
+        <td data-l="Coin"><span class="coin">${esc(g.coin)}</span></td>
+        <td class="r" data-l="Trades">${g.n}</td>
+        <td class="r ${signClass(g.pnl)}" data-l="Net $">${fmtUSD(g.pnl, true)}</td>
+      </tr>`).join('') : emptyRow(3, 'no closed trades yet');
     } catch (e) {
-      try { console.error('rule-book panel failed to render; hiding it', e); } catch (_) { /* noop */ }
+      try { console.error('rule-engine panel failed to render; hiding it', e); } catch (_) { /* noop */ }
       panel.hidden = true;
     }
   }
@@ -1751,24 +1607,6 @@
     if (state.feedQuietOpen.has(key)) state.feedQuietOpen.delete(key); else state.feedQuietOpen.add(key);
     renderFeed();
   });
-  // Architecture race: the cards are tabs — pick a book to show its detail view below the strip.
-  // Clicking never changes data, only which detail is visible (state.raceTab, a JS variable only).
-  (function wireRaceTabs() {
-    const strip = $id('arch-race');
-    if (!strip) return;   // stale cached index.html without the strip: nothing to wire
-    const pickBook = (e) => {
-      const card = e.target.closest('.race-card');
-      if (!card || !card.dataset.book || !strip.contains(card)) return;
-      state.raceTab = card.dataset.book;
-      renderArchRace();   // re-renders the strip highlight + the detail view
-    };
-    strip.addEventListener('click', pickBook);
-    strip.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      e.preventDefault();
-      pickBook(e);
-    });
-  })();
   // Shadow & learner panel: view tabs (active tab survives the poll re-render, like the feed chips).
   $id('shl-tabs').addEventListener('click', (e) => {
     const b = e.target.closest('.fchip');
@@ -2098,7 +1936,7 @@
     renderMarketBrief();
     renderChart();
     renderPositions();
-    renderRuleBook();   // self-contained try/catch: a malformed rule_book payload never blanks the dashboard
+    renderRuleEngine();   // v3 HERO: self-contained try/catch: a malformed rule_book payload never blanks the dashboard
     // Isolated: a bad shadow-trades payload or a stale page must never blank the rest of the dashboard
     // (before this guard, one exception here also killed the demo fallback's renderAll — total wipeout).
     try {
